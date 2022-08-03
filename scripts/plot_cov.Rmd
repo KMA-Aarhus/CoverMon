@@ -105,6 +105,7 @@ plot_cov <- function(file) {
          group_by(chr) %>%
          mutate(idx = row_number())
     hotspotplot <- ggplot(regions, aes(xmin = start,ymin = 0+idx%%2,xmax = stop,ymax = 1+idx%%2)) +
+        xlim(min(reduced$idx),max(reduced$idx)) +
         xlab("Region") +
         geom_rect(fill = "white", alpha = 0.5) +
         theme_solarized(light = FALSE) +
