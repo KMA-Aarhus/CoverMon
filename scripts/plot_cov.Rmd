@@ -11,6 +11,10 @@ params:
     value: x
   region_file:
     value: x
+  threshold:
+    value: x
+  maxDepth:
+    value: x
 
 ---
 
@@ -56,8 +60,19 @@ if (!params$region_file == "NA") {
 
  
 files = list.files(paste0(params$path,"/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
-threshold <- 100
-maxDepth <- 1000
+if (!params$threshold == "NA") {
+  threshold = params$threshold
+} else  { 
+  threshold <- 30
+}
+
+if (!params$maxDepth == "NA") {
+  maxDepth = params$maxDepth
+} else  { 
+  maxDepth <- 400
+}
+
+
 ```
 
 

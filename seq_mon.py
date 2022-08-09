@@ -24,23 +24,23 @@ from pathlib import Path
 
 #print(msg)
 if len(sys.argv) < 4:
-    raise Exception(f"Missing arguments. The script must contain (1) samplesheet, (2) path to run directory, (3) path to reference or reference directory. Optionally, a region file (4) can be specified if all samples use the same reference genome.")
+    raise Exception(f"Missing arguments. The script must contain (1) samplesheet, (2) path to run directory, (3) path to reference or reference directory, (4) threshold for minimum coverage, (5) maximum depth displayed in plot. Optionally, a region file (6) can be specified if all samples use the same reference genome.")
 
 # TODO: These variables should be set from the command line
-print("This is the samplesheet: ", sys.argv[1])
-print("This is the run directory: ", sys.argv[2])
-print("This is the reference directory:", sys.argv[3])
 
 # Actually given on the command line:
 
 samplesheet = sys.argv[1]
 rundir = sys.argv[2]
+threshold = sys.argv[4]
+maxDepth = sys.argv[5]
+
 if ".fa" in sys.argv[3]:
     reference = sys.argv[3]
     one_ref = True
-    if len(sys.argv) == 5:
-        region_file = sys.argv[4]
-        print("This is the region file:", sys.argv[4])
+    if len(sys.argv) == 7:
+        region_file = sys.argv[6]
+        print("This is the region file:", sys.argv[6])
     else: 
         region_file = "NA"
 else:
@@ -66,9 +66,11 @@ print()
 
 
 print(f"These are the parameters given:")
-print(f"  samplesheet: {samplesheet}")
-print(f"  rundir: {rundir}")
-print()
+print("This is the samplesheet: ", samplesheet)
+print("This is the run directory: ", rundir)
+print("This is the reference:", reference)
+print("This is the threshold: ", threshold)
+print("This is the maxDepth in plot:", maxDepth)
 
 #########################
 # Parse the samplesheet #
@@ -222,8 +224,24 @@ print()
 #################################
 # Finally we can start CoveMon. #
 #################################
+open_report = False
 
-processed_files = []
+if exists(f"{out_base}/processed_files.txt"):
+    processed_files_txt = open(f"{out_base}/processed_files.txt", mode ="r", newline=nl)
+    processed_files = processed_files_txt.read().splitlines()
+    print("THIS ARE THE PROCESSED FILES: ", processed_files)
+    processed_files_txt.close()
+    subprocess.run("gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + out_base +"\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"", shell=True)                
+    open_report = True
+else:
+    processed_files = []
+
+def write_to_processed(f):
+    processed_files_txt = open(f"{out_base}/processed_files.txt","a")
+    processed_files_txt.write(f"{f}{nl}")
+    processed_files_txt.close()
+
+
 logfile=very_long_batch_id+".log"
 print(logfile)
 tmpsam = out_base+'/'+'tmp.sam'
@@ -231,7 +249,7 @@ tmpbam = out_base+'/'+'tmp.bam'
 # When sequencing, we will check for new files every 60 seconds
 seconds_wait = 60
 # Ensure we only open report once
-open_report = False
+
 still_sequencing = True
 while still_sequencing:
     print("Scanning for new fastq files...")
@@ -252,35 +270,42 @@ while still_sequencing:
                 sam2bam = f'samtools sort -O bam -o {bam_out} {tmpsam}'
                 print("Creating initial bam: ", sam2bam)
                 subprocess.run(sam2bam.split())
+
                 processed_files.append(f)
+                write_to_processed(f)
+
                 print("Number of processed files: ", len(processed_files))
-                continue
-            # Maps new reads to reference
-            map_cmd = f"minimap2 -a -o {tmpsam} {reference} {f}"
-            print(map_cmd)
-            subprocess.run(map_cmd.split())
-            # Sort the mapping files for merging
-            sort_cmd = f'samtools sort -O bam -o {out_base}/sorted.bam {tmpsam}'
-            print(sort_cmd)
-            subprocess.run(sort_cmd.split())
-            # Merges the sorted files
-            merge_cmd = f'samtools merge -f -o {tmpbam} {out_base}/sorted.bam {bam_out}'
-            print(merge_cmd)
-            subprocess.run(merge_cmd.split())
-            #Sets the new bam to the barcode bam and marks file as processed
-            subprocess.run(['mv', tmpbam, bam_out])
-            processed_files.append(f)
-            print("Number of processed files: ", len(processed_files))
+            else:
+                # Maps new reads to reference
+                map_cmd = f"minimap2 -a -o {tmpsam} {reference} {f}"
+                print(map_cmd)
+                subprocess.run(map_cmd.split())
+                # Sort the mapping files for merging
+                sort_cmd = f'samtools sort -O bam -o {out_base}/sorted.bam {tmpsam}'
+                print(sort_cmd)
+                subprocess.run(sort_cmd.split())
+                # Merges the sorted files
+                merge_cmd = f'samtools merge -f -o {tmpbam} {out_base}/sorted.bam {bam_out}'
+                print(merge_cmd)
+                subprocess.run(merge_cmd.split())
+                #Sets the new bam to the barcode bam and marks file as processed
+                subprocess.run(['mv', tmpbam, bam_out])
+
+                processed_files.append(f)
+                write_to_processed(f)
+
+                print("Number of processed files: ", len(processed_files))
             # Index the new bam and calculate depth. Then creates the monitoring html
             plot_cov_cmd1 = f'samtools index '+ bam_out
             plot_cov_cmd2 = f'samtools depth -aa {bam_out} -o {depth}'
             #Getting the below line to run was a pain. Hence, it is presented as a list.
-            plot_cov_cmd3 = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',", "params = list(path = ", "\'"+out_base+"\', region_file = ", "\'"+region_file+"\'))\""]
             
             print(plot_cov_cmd1.split())
             subprocess.run(plot_cov_cmd1.split())
             print(plot_cov_cmd2.split())
             subprocess.run(plot_cov_cmd2.split())
+            plot_cov_cmd3 = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',", "params = list(threshold = ",threshold,", maxDepth= ",maxDepth,", path = ", "\'"+out_base+"\', region_file = ", "\'"+region_file+"\'))\""]
+            
             print(plot_cov_cmd3)
             subprocess.run(" ".join(plot_cov_cmd3), shell=True)
             subprocess.run(['mv', 'scripts/plot_cov.html', out_base])
