@@ -168,6 +168,7 @@ full_table <- full_join(summary_df, samplesheet, by=c("Barcode"="barcode")) %>% 
 below_qc_table <- full_table[ which(full_table$percent_over_threshold < 90), ]
 
 colnames(below_qc_table)[3] <- paste0("% positions > ",as.character(threshold),"x")
+below_qc_table <- below_qc_table[order(below_qc_table$Barcode),]
 below_qc_table %>%
   kbl(row.names=FALSE) %>%
   kable_styling(bootstrap_options = c("striped","bordered"))
@@ -183,6 +184,7 @@ for(plt in plots) {
 *Tabel `r tableno()`: Staticstics all samples.*
 ```{r, fig.width=30, fig.height=5, fig.keep = 'all'}
 colnames(full_table)[3] <- paste0("% positions > ",as.character(threshold),"x")
+full_table <- full_table[order(full_table$Barcode),]
 full_table %>%
   kbl(row.names=FALSE) %>%
   kable_styling(bootstrap_options = c("striped","bordered"))
