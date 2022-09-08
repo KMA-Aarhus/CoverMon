@@ -267,7 +267,7 @@ def start_covermon():
 
     out_base = os.path.join(base_dir, "CoverMon") # out_base is the directory where the pipeline will write its output to.
     print("Creating output directory ", out_base,"...")
-    subprocess.run(["mkdir",out_base])
+    subprocess.run(["mkdir","-p", out_base])
     print()
 
     sample_sheet_out = f"{out_base}/sample_sheet_given.tsv"
