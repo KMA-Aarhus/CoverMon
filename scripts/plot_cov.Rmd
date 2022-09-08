@@ -15,6 +15,8 @@ params:
     value: x
   maxDepth:
     value: x
+  samplesheet:
+    value: x
 
 ---
 
@@ -48,27 +50,26 @@ if (!require("cowplot")) {
 install.packages("cowplot") }
 if (!require("ggthemes")) {
 install.packages("ggthemes") }
-
-
 plot_regions = FALSE
 
-## Pull in the data
+# ## Pull in the data
 if (!params$region_file == "NA") {
   plot_regions = TRUE
   regions = read.table(params$region_file, header=FALSE)
 }
 
- 
+
+samplesheet = read.table(params$samplesheet, header=TRUE)
+
 files = list.files(paste0(params$path,"/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
 if (!params$threshold == "NA") {
   threshold = params$threshold
-} else  { 
+} else  {
   threshold <- 30
 }
-
 if (!params$maxDepth == "NA") {
   maxDepth = params$maxDepth
-} else  { 
+} else  {
   maxDepth <- 400
 }
 
@@ -77,13 +78,10 @@ if (!params$maxDepth == "NA") {
 
 
 ```{r, fig.show='hide'}
-
-
 myColors <- brewer.pal(10,"Paired")
 dat <- data.frame(x=runif(10),y=runif(10),
                   color_grp = as.character(rep(1:10,each = 1)), stringsAsFactors=T)
 names(myColors) <- levels(dat$color_grp)
-
 plot_cov <- function(file) { 
   dir <- str_split(file, "/")[[1]]
   barcode <- sub(".depth", "", as.character(dir[length(dir)]))
@@ -118,8 +116,12 @@ plot_cov <- function(file) {
     colnames(regions) = c("chr","start","stop","pool", "strand")
     regions <- regions %>%
          group_by(chr) %>%
-         mutate(idx = row_number())
-    hotspotplot <- ggplot(regions, aes(xmin = start,ymin = 0+idx%%2,xmax = stop,ymax = 1+idx%%2)) +
+         mutate(dodge = row_number()) 
+    idx_start = inner_join(regions, filtered, by=c("chr"="Contig", "start"="Pos"))
+    regions$idx_start <- idx_start$idx
+    idx_stop = inner_join(regions, filtered, by=c("chr"="Contig", "stop"="Pos"))
+    regions$idx_stop <- idx_stop$idx
+    hotspotplot <- ggplot(regions, aes(xmin = idx_start,ymin = 0+dodge%%2,xmax = idx_stop,ymax = 1+dodge%%2)) +
         xlim(min(reduced$idx),max(reduced$idx)) +
         xlab("Region") +
         geom_rect(fill = "white", alpha = 0.5) +
@@ -133,11 +135,11 @@ plot_cov <- function(file) {
   
   return(list(plt,barcode,mean_cov,percent_over_threshold))
 }
-
 plots <- c()
 barcodes <- c()
 mean_covs <- c()
 percent_over_thresholds <- c()
+
 
 for(f in files) {
   sample_data <- plot_cov(f)
@@ -145,22 +147,38 @@ for(f in files) {
   barcodes <- append(barcodes, sample_data[2])
   mean_covs <- append(mean_covs, sample_data[3])
   percent_over_thresholds <- append(percent_over_thresholds, sample_data[4])
-
 }
 ```
-*Tabel `r tableno()`: Overordnet kørsels statistik.*
+*Tabel `r tableno()`: Samples with insufficient coverage.*
 
 ```{r echo=F, message=F, warning=F}
 summary_df <- data.frame(cbind(barcodes, mean_covs, percent_over_thresholds))
-names(summary_df) <- c("Barcode", "Mean coverage", paste0("Percent over ",as.character(threshold),"x"))
-summary_df %>%
-    knitr::kable()
+
+names(summary_df) <- c("Barcode", "Mean coverage", "percent_over_threshold")
+#paste0("Percent over ",as.character(threshold),"x")
+summary_df <- summary_df %>%  
+    mutate(Barcode = as.character(Barcode))
+
+samplesheet <- samplesheet %>%  
+    mutate(barcode = as.character(barcode))
+
+full_table <- full_join(summary_df, samplesheet, by=c("Barcode"="barcode")) %>% replace(.=="NULL", 0)
+below_qc_table <- full_table[ which(full_table$percent_over_threshold < 90), ]
+
+colnames(below_qc_table)[3] <- paste0("% positions > ",as.character(threshold),"x")
+below_qc_table %>%
+    knitr::kable(row.names=FALSE)
 ```
 
+*Coverage figures. Multiple contigs are displayed in alternating colours*
 ```{r, fig.width=30, fig.height=5, fig.keep = 'all'}
-
 for(plt in plots) {
-
   plot(plt)
 }
+```
+*Tabel `r tableno()`: Staticstics all samples.*
+```{r, fig.width=30, fig.height=5, fig.keep = 'all'}
+colnames(full_table)[3] <- paste0("% positions > ",as.character(threshold),"x")
+full_table %>%
+    knitr::kable(row.names=FALSE)
 ```
