@@ -50,6 +50,8 @@ if (!require("cowplot")) {
 install.packages("cowplot") }
 if (!require("ggthemes")) {
 install.packages("ggthemes") }
+if (!require("kableExtra")) {
+install.packages("kableExtra") }
 plot_regions = FALSE
 
 # ## Pull in the data
@@ -167,7 +169,9 @@ below_qc_table <- full_table[ which(full_table$percent_over_threshold < 90), ]
 
 colnames(below_qc_table)[3] <- paste0("% positions > ",as.character(threshold),"x")
 below_qc_table %>%
-    knitr::kable(row.names=FALSE)
+  kbl(row.names=FALSE) %>%
+  kable_styling(bootstrap_options = c("striped","bordered"))
+
 ```
 
 *Coverage figures. Multiple contigs are displayed in alternating colours*
@@ -180,5 +184,6 @@ for(plt in plots) {
 ```{r, fig.width=30, fig.height=5, fig.keep = 'all'}
 colnames(full_table)[3] <- paste0("% positions > ",as.character(threshold),"x")
 full_table %>%
-    knitr::kable(row.names=FALSE)
+  kbl(row.names=FALSE) %>%
+  kable_styling(bootstrap_options = c("striped","bordered"))
 ```
