@@ -147,7 +147,7 @@ def start_covermon():
         processed_files_txt.write(f"{f}{nl}")
         processed_files_txt.close()
 
-    def update_plot(workflow_table, reference, samplesheet):
+    def update_plot(workflow_table, reference, samplesheet,open_report):
         print("Scanning for new fastq files...")
         for index, row in workflow_table.iterrows():
             bam_out = out_base+"/"+row['barcode']+".bam"
@@ -205,6 +205,10 @@ def start_covermon():
                 subprocess.run(" ".join(plot_cov_cmd3), shell=True)
                 subprocess.run(['mv', 'scripts/plot_cov.html', out_base])
 
+                # Starts browser-sync in a new terminal if the report is not open. This will not work on windows or macOS.
+                if not open_report:
+                    subprocess.run("gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + out_base +"\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"", shell=True)        
+                    open_report = True
 
     #####################
     # Start the monitor #
@@ -307,12 +311,7 @@ def start_covermon():
 
     while still_sequencing:
         # Scans for new files and updates the plot if any are found
-        update_plot(workflow_table, reference, sample_sheet_out)
-
-        # Starts browser-sync in a new terminal if the report is not open. This will not work on windows or macOS.
-        if not open_report:
-            subprocess.run("gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + out_base +"\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"", shell=True)        
-            open_report = True
+        update_plot(workflow_table, reference, sample_sheet_out,open_report)
 
         # Continue the monitor as long as the sequence summary does not exist. Wait <seconds_wait> between scans.
         sequencing_summary_file = glob.glob(base_dir + "/sequencing_summary_*.txt")
