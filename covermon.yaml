@@ -11,3 +11,4 @@ dependencies:
  - samtools = 1.15.1
  - minimap2 = 2.24
  - pandoc
+ - r-kableextra
