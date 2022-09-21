@@ -115,7 +115,9 @@ plot_cov <- function(file) {
         axis.title=element_text(size=22,face="bold"))+
     scale_color_manual(values = myColors)
   if (plot_regions== TRUE) { 
-    colnames(regions) = c("chr","start","stop","pool", "strand")
+    regions <- regions[,1:3]
+    colnames(regions) = c("chr","start","stop")
+    
     regions <- regions %>%
          group_by(chr) %>%
          mutate(dodge = row_number()) 

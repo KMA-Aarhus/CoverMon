@@ -206,7 +206,7 @@ def start_covermon():
                 subprocess.run(['mv', 'scripts/plot_cov.html', out_base])
 
                 # Starts browser-sync in a new terminal if the report is not open. This will not work on windows or macOS.
-                if not open_report:
+                if open_report == False:
                     subprocess.run("gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + out_base +"\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"", shell=True)        
                     open_report = True
 
@@ -286,10 +286,11 @@ def start_covermon():
     ##################
 
     # Set an open_report state to stop opening multiple reports
+    print("Setting open_report to false")
     open_report = False
 
     # Keep track of processed files to avoid starting from scratch if script is terminated
-    if exists(f"{out_base}/processed_files.txt"):
+    if exists(f"{out_base}/processed_files.txt") and open_report == False:
         processed_files_txt = open(f"{out_base}/processed_files.txt", mode ="r", newline=nl)
         processed_files = processed_files_txt.read().splitlines()
         processed_files_txt.close()
