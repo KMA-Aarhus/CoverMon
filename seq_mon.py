@@ -265,7 +265,10 @@ def start_covermon():
     # Create output directory #
     ###########################
 
-    out_base = os.path.join(base_dir, "CoverMon") # out_base is the directory where the pipeline will write its output to.
+    if one_ref == True:
+        out_base = os.path.join(base_dir, "CoverMon_"+reference.split("/")[-1].split(".")[0])
+    else:
+        out_base = os.path.join(base_dir, "CoverMon") # out_base is the directory where the pipeline will write its output to.
     print("Creating output directory ", out_base,"...")
     subprocess.run(["mkdir","-p", out_base])
     print()
