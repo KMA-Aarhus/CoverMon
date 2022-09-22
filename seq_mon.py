@@ -206,9 +206,12 @@ def start_covermon():
                 subprocess.run(['mv', 'scripts/plot_cov.html', out_base])
 
                 # Starts browser-sync in a new terminal if the report is not open. This will not work on windows or macOS.
+                print("Updated plot, open_report = ", open_report)
                 if open_report == False:
+                    print("open_report = ", open_report, ". Opening report")
                     subprocess.run("gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + out_base +"\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"", shell=True)        
                     open_report = True
+        return open_report
 
     #####################
     # Start the monitor #
@@ -264,11 +267,11 @@ def start_covermon():
     ###########################
     # Create output directory #
     ###########################
-
     if one_ref == True:
         out_base = os.path.join(base_dir, "CoverMon_"+reference.split("/")[-1].split(".")[0])
     else:
         out_base = os.path.join(base_dir, "CoverMon") # out_base is the directory where the pipeline will write its output to.
+    print("Creating output directory ", out_base,"...")
     print("Creating output directory ", out_base,"...")
     subprocess.run(["mkdir","-p", out_base])
     print()
@@ -294,6 +297,7 @@ def start_covermon():
 
     # Keep track of processed files to avoid starting from scratch if script is terminated
     if exists(f"{out_base}/processed_files.txt") and open_report == False:
+        print("I have found processed files, opening report")
         processed_files_txt = open(f"{out_base}/processed_files.txt", mode ="r", newline=nl)
         processed_files = processed_files_txt.read().splitlines()
         processed_files_txt.close()
@@ -315,7 +319,7 @@ def start_covermon():
 
     while still_sequencing:
         # Scans for new files and updates the plot if any are found
-        update_plot(workflow_table, reference, sample_sheet_out,open_report)
+        open_report = update_plot(workflow_table, reference, sample_sheet_out,open_report)
 
         # Continue the monitor as long as the sequence summary does not exist. Wait <seconds_wait> between scans.
         sequencing_summary_file = glob.glob(base_dir + "/sequencing_summary_*.txt")
@@ -331,5 +335,4 @@ def start_covermon():
 
 if __name__ == "__main__":
     start_covermon()
-
 
