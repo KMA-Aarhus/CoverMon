@@ -54,7 +54,7 @@ def start_covermon():
                     raise Exception(f"The sample sheet is missing a necessary column. The sample sheet must contain the column {i}, but it only contains {df.columns.tolist()}")
             print("✓")
         # Check that the barcodes look correct
-        acceptable_barcodes = [f"NB{i:02d}" for i in range(1,97)]
+        acceptable_barcodes = [f"NB{i:02d}" for i in range(1,97)] + [f"RB{i:02d}" for i in range(1,97)]
 
         print("Checking that the barcodes are correctly formatted ... ", end = "", flush = True)
 
