@@ -61,7 +61,7 @@ if (!params$region_file == "NA") {
 }
 
 
-samplesheet = read.table(params$samplesheet, header=TRUE)
+samplesheet = read.table(params$samplesheet, header=TRUE, sep = "\t")
 
 files = list.files(paste0(params$path,"/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
 if (!params$threshold == "NA") {
