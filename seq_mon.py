@@ -129,7 +129,12 @@ def start_covermon():
 
 
         disk_barcodes_df = disk_barcodes_df.assign(barcode_basename = [i.split("/")[-1] for i in disk_barcodes_df["barcode_path"]])
-        disk_barcodes_df = disk_barcodes_df.assign(barcode = ["NB" + i[-2:] for i in disk_barcodes_df["barcode_path"]])
+        if "RB" in df["barcode"][0]:
+            disk_barcodes_df = disk_barcodes_df.assign(barcode = ["RB" + i[-2:] for i in disk_barcodes_df["barcode_path"]])
+        elif "NB" in df["barcode"][0]:
+            disk_barcodes_df = disk_barcodes_df.assign(barcode = ["NB" + i[-2:] for i in disk_barcodes_df["barcode_path"]])
+        else:
+            raise Exception(f"Barcodes in samplesheet are not acceptable")
 
         print("Continuing with the following barcodes:")
 
