@@ -54,33 +54,33 @@ if (!require("kableExtra")) {
 install.packages("kableExtra") }
 plot_regions = FALSE
 
-# ## Pull in the data
-#if (!params$region_file == "NA") {
-#  plot_regions = TRUE
-#  regions = read.table(params$region_file, header=FALSE)
-#}
+## Pull in the data
+if (!params$region_file == "NA") {
+  plot_regions = TRUE
+  regions = read.table(params$region_file, header=FALSE)
+}
 
 
-#samplesheet = read.table(params$samplesheet, header=TRUE, sep = "\t")
+samplesheet = read.table(params$samplesheet, header=TRUE, sep = "\t")
 
-#files = list.files(paste0(params$path,"/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
-#if (!params$threshold == "NA") {
-#  threshold = params$threshold
-#} else  {
-#  threshold <- 30
-#}
-#if (!params$maxDepth == "NA") {
-#  maxDepth = params$maxDepth
-#} else  {
-#  maxDepth <- 400
-#}
-files = list.files(paste0("/Users/admin1/Documents/KMA_AUH/CoverMon/CoverMon_CMV_CoverMon_reference/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
+files = list.files(paste0(params$path,"/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
+if (!params$threshold == "NA") {
+  threshold = params$threshold
+} else  {
+  threshold <- 30
+}
+if (!params$maxDepth == "NA") {
+  maxDepth = params$maxDepth
+} else  {
+  maxDepth <- 400
+}
+#files = list.files(paste0("/Users/admin1/Documents/KMA_AUH/CoverMon/CoverMon_CMV_CoverMon_reference/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
 
-regions = read.table("/Users/admin1/Documents/KMA_AUH/CoverMon/panel_files/CMV_CoverMon_reference_amplicons.bed", header=FALSE)
-samplesheet = read.table("/Users/admin1/Documents/KMA_AUH/CoverMon/sample_sheet_given.tsv", header=TRUE, sep = "\t")
-threshold <- 100
-plot_regions = TRUE
-maxDepth <- 5000
+#regions = read.table("/Users/admin1/Documents/KMA_AUH/CoverMon/panel_files/CMV_CoverMon_reference_amplicons.bed", header=FALSE)
+#samplesheet = read.table("/Users/admin1/Documents/KMA_AUH/CoverMon/sample_sheet_given.tsv", header=TRUE, sep = "\t")
+#threshold <- 100
+#plot_regions = TRUE
+#maxDepth <- 5000
 
 ```
 
