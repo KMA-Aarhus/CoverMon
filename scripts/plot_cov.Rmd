@@ -6,17 +6,17 @@ output:
     theme: dark
     toc: False
     toc_depth: 2
-#params:
-#  path:
-#    value: x
-#  region_file:
-#    value: x
-#  threshold:
-#    value: x
-#  maxDepth:
-#    value: x
-#  samplesheet:
-#    value: x
+params:
+  path:
+    value: x
+  region_file:
+    value: x
+  threshold:
+    value: x
+  maxDepth:
+    value: x
+  samplesheet:
+    value: x
 
 ---
 
