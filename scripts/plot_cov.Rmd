@@ -6,17 +6,17 @@ output:
     theme: dark
     toc: False
     toc_depth: 2
-params:
-  path:
-    value: x
-  region_file:
-    value: x
-  threshold:
-    value: x
-  maxDepth:
-    value: x
-  samplesheet:
-    value: x
+#params:
+#  path:
+#    value: x
+#  region_file:
+#    value: x
+#  threshold:
+#    value: x
+#  maxDepth:
+#    value: x
+#  samplesheet:
+#    value: x
 
 ---
 
@@ -55,26 +55,32 @@ install.packages("kableExtra") }
 plot_regions = FALSE
 
 # ## Pull in the data
-if (!params$region_file == "NA") {
-  plot_regions = TRUE
-  regions = read.table(params$region_file, header=FALSE)
-}
+#if (!params$region_file == "NA") {
+#  plot_regions = TRUE
+#  regions = read.table(params$region_file, header=FALSE)
+#}
 
 
-samplesheet = read.table(params$samplesheet, header=TRUE, sep = "\t")
+#samplesheet = read.table(params$samplesheet, header=TRUE, sep = "\t")
 
-files = list.files(paste0(params$path,"/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
-if (!params$threshold == "NA") {
-  threshold = params$threshold
-} else  {
-  threshold <- 30
-}
-if (!params$maxDepth == "NA") {
-  maxDepth = params$maxDepth
-} else  {
-  maxDepth <- 400
-}
+#files = list.files(paste0(params$path,"/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
+#if (!params$threshold == "NA") {
+#  threshold = params$threshold
+#} else  {
+#  threshold <- 30
+#}
+#if (!params$maxDepth == "NA") {
+#  maxDepth = params$maxDepth
+#} else  {
+#  maxDepth <- 400
+#}
+files = list.files(paste0("/Users/admin1/Documents/KMA_AUH/CoverMon/CoverMon_CMV_CoverMon_reference/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
 
+regions = read.table("/Users/admin1/Documents/KMA_AUH/CoverMon/panel_files/CMV_CoverMon_reference_amplicons.bed", header=FALSE)
+samplesheet = read.table("/Users/admin1/Documents/KMA_AUH/CoverMon/sample_sheet_given.tsv", header=TRUE, sep = "\t")
+threshold <- 100
+plot_regions = TRUE
+maxDepth <- 5000
 
 ```
 
@@ -97,7 +103,7 @@ plot_cov <- function(file) {
   percent_over_threshold <- (nrow(cvg[cvg$Coverage >= threshold,])/nrow(cvg))*100
   percent_over_threshold <- round(percent_over_threshold, digits=2)
   cvg$Coverage[cvg$Coverage > maxDepth] <- maxDepth 
-  large_contigs <- cvg %>% group_by(Contig) %>% count() %>% filter(n >= 1000) %>% pull(Contig)
+  large_contigs <- cvg %>% group_by(Contig) %>% count() %>% filter(n >= 1000) %>%   pull(Contig)
   
   filtered <- cvg %>% filter(Contig %in% large_contigs)
   
@@ -105,7 +111,7 @@ plot_cov <- function(file) {
   filtered <- filtered %>% mutate(color_grp = as.character(ifelse(color_grp==5,10, color_grp)))
   reduced <- filtered %>%  slice(which(Pos %% 10 == 0))
  
-  plt <- ggplot(reduced,aes(x=idx, y=Coverage,color = ifelse(Coverage > threshold,color_grp,"5")), show.legend=FALSE)+
+  plt <- ggplot(reduced,aes(x=idx, y=Coverage,color = color_grp,"5"), show.legend=FALSE)+
     geom_line(aes(group=Contig), show.legend=FALSE) + 
     geom_hline(aes(yintercept = threshold), color="darkred", show.legend=FALSE) +
     ylim(0,maxDepth) + 
@@ -121,20 +127,36 @@ plot_cov <- function(file) {
     regions <- regions %>%
          group_by(chr) %>%
          mutate(dodge = row_number()) 
+    regions <- regions %>%
+      left_join(filtered %>% select(Contig, color_grp) %>% distinct(), by = c("chr" = "Contig")) %>%
+      mutate(color_grp = as.character(color_grp)) # Align colors with filtered
     idx_start = inner_join(regions, filtered, by=c("chr"="Contig", "start"="Pos"))
     regions$idx_start <- idx_start$idx
     idx_stop = inner_join(regions, filtered, by=c("chr"="Contig", "stop"="Pos"))
     regions$idx_stop <- idx_stop$idx
-    hotspotplot <- ggplot(regions, aes(xmin = idx_start,ymin = 0+dodge%%2,xmax = idx_stop,ymax = 1+dodge%%2)) +
-        xlim(min(reduced$idx),max(reduced$idx)) +
-        xlab("Region") +
-        geom_rect(fill = "white", alpha = 0.5) +
-        theme_solarized(light = FALSE) +
-        theme(legend.position = "none",
-              axis.text.y = element_blank(),
-              axis.ticks.y = element_blank(),
-              axis.ticks.x = element_blank())
-    plt <- plot_grid(plt, hotspotplot, ncol=1,align="v", axis="lr", rel_heights = c(5,1))
+    regions <- regions %>% 
+      ungroup() %>% 
+      mutate(region_label = row_number())
+
+
+    hotspotplot <- ggplot(regions, aes(xmin = idx_start, ymin = 0 + dodge %% 2, 
+                                           xmax = idx_stop, ymax = 1 + dodge %% 2, 
+                                           fill = color_grp)) +
+            xlim(min(reduced$idx), max(reduced$idx)) +
+            xlab("Region") +
+            geom_rect(alpha = 0.5) +
+            geom_text(aes(x = (idx_start + idx_stop) / 2, y = 0.5 + dodge %% 2, label = region_label), 
+              color = "white", size = 5, vjust = 0.5, hjust = 0.5) +
+            theme_solarized(light = FALSE) +
+            theme(
+                legend.position = "none",
+                axis.text.y = element_blank(),
+                axis.ticks.y = element_blank(),
+                axis.ticks.x = element_blank()
+            ) +
+            scale_fill_manual(values = myColors)
+        
+        plt <- plot_grid(plt, hotspotplot, ncol = 1, align = "v", axis = "lr", rel_heights = c(4, 1))
     }
   
   return(list(plt,barcode,mean_cov,percent_over_threshold))
