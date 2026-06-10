@@ -42,6 +42,7 @@ class CoverReport:
     with tracking of open/close status and processed input files.
     Attributes:
         workflow_table:     mapping of fastq_pass dirs to barcodes
+        sample_sheet:       path to sample sheet
         threshold:          minimum coverage required
         maxDepth:           maximum coverage reported
         reference:          reference file or directory
@@ -49,12 +50,14 @@ class CoverReport:
         is_open:            whether the report is currently opened in the browser
         processed_files:    the files processed by this instance of CoverMon
     """
-    def __init__(self, workflow_table: pd.DataFrame, threshold: int, maxDepth: int, reference: str, out_base: str)\
+    def __init__(self, workflow_table: pd.DataFrame, sample_sheet: str, threshold: int, maxDepth: int,
+                 reference: str, out_base: str) \
             -> None:
         """Initialize a CoverReport object.
 
         Args:
             workflow_table: mapping of fastq_pass dirs to barcodes
+            sample_sheet:   path to sample sheet
             threshold:      minimum coverage required
             maxDepth:       maximum coverage reported
             reference:      reference file or directory
@@ -66,6 +69,7 @@ class CoverReport:
         if threshold > maxDepth:
             raise ValueError("Highest reported coverage must exceed minimum required coverage.")
         self.workflow_table = workflow_table
+        self.sample_sheet = sample_sheet
         self.threshold = threshold
         self.maxDepth = maxDepth
         self.reference = pathlib.Path(reference)  # TODO: rework to take a Path to begin with?
@@ -75,7 +79,8 @@ class CoverReport:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, CoverReport):
-            return ((self.threshold == other.threshold
+            return ((self.sample_sheet == other.sample_sheet
+                     and self.threshold == other.threshold
                      and self.maxDepth == other.maxDepth
                      and self.reference == other.reference
                      and self.out_base == other.out_base
@@ -85,7 +90,7 @@ class CoverReport:
         return False
 
     def __repr__(self):
-        return(f"CoverReport(threshold={self.threshold}, maxDepth={self.maxDepth},"
+        return(f"CoverReport(sample_sheet={self.sample_sheet}, threshold={self.threshold}, maxDepth={self.maxDepth},"
                f" reference={self.reference}, out_base={self.out_base}, processed_files={self.processed_files},"
                f" is_open={self.is_open})\n"
                f"Workflow table:\n{self.workflow_table.head().to_string()}")
