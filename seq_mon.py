@@ -3,6 +3,7 @@ __version__ = "0.3"
 
 import glob
 import os
+import pathlib
 import subprocess
 import sys
 import time
@@ -10,7 +11,6 @@ import time
 from argparse import ArgumentParser
 from os import listdir
 from os.path import isfile, isdir, join, exists
-from pathlib import Path
 
 
 import pandas as pd
@@ -19,6 +19,97 @@ import numpy as np
 # TODO add convenience wait function?
 
 # TODO: create a run object to carry all of the information?
+
+# TODO: ALL OF THE VARS here, let's feed this an object specifying report params
+# We need:
+# already specified as args:
+# - workflow_table - mapping of fastq pass dirs to barcodes, could be attached to the report instead
+# - reference - reference file/dir if given (attach to report, build the per-line ref path?)
+# - samplesheet: path to sample sheet
+# - open_report: whether the report is open or not - could attach that to the CoverReport?
+
+# used to be in the main function
+# - out_base: the output base dir (attach to report?)
+# - one_ref: whether the ref is a file or a dir - maybe just go off the CoverReport's reference, if that is_dir or not
+# - refdir: replace with CoverReport.reference
+# - processed_files: attach to CoverReport?
+# - threshold: attach to CoverReport - take from config in the future?
+# - maxDepth: attach to CoverReport - take from config in the future?
+# - region_file: attach to CoverReport
+
+class CoverReport:
+    """A coverage report generated on the base of input data and parameters, written to an output directory,
+    with tracking of open/close status and processed input files.
+    Attributes:
+        workflow_table:     mapping of fastq_pass dirs to barcodes
+        threshold:          minimum coverage required
+        maxDepth:           maximum coverage reported
+        reference:          reference file or directory
+        out_base:           output base directory
+        is_open:            whether the report is currently opened in the browser
+        processed_files:    the files processed by this instance of CoverMon
+    """
+    def __init__(self, workflow_table: pd.DataFrame, threshold: int, maxDepth: int, reference: str, out_base: str)\
+            -> None:
+        """Initialize a CoverReport object.
+
+        Args:
+            workflow_table: mapping of fastq_pass dirs to barcodes
+            threshold:      minimum coverage required
+            maxDepth:       maximum coverage reported
+            reference:      reference file or directory
+            out_base:       output base directory
+
+        Raises:
+            ValueError  if the maximum reported coverage is lower than the minimum coverage required
+        """
+        if threshold > maxDepth:
+            raise ValueError("Highest reported coverage must exceed minimum required coverage.")
+        self.workflow_table = workflow_table
+        self.threshold = threshold
+        self.maxDepth = maxDepth
+        self.reference = pathlib.Path(reference)  # TODO: rework to take a Path to begin with?
+        self.out_base = pathlib.Path(out_base)
+        self.is_open = False  # TODO: can we assume this?
+        self.processed_files = []
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, CoverReport):
+            return ((self.threshold == other.threshold
+                     and self.maxDepth == other.maxDepth
+                     and self.reference == other.reference
+                     and self.out_base == other.out_base
+                     and self.is_open == other.is_open
+                     and self.processed_files == other.processed_files
+                     and self.workflow_table.equals(other.workflow_table)))
+        return False
+
+    def __repr__(self):
+        return(f"CoverReport(threshold={self.threshold}, maxDepth={self.maxDepth},"
+               f" reference={self.reference}, out_base={self.out_base}, processed_files={self.processed_files},"
+               f" is_open={self.is_open})\n"
+               f"Workflow table:\n{self.workflow_table.head().to_string()}")
+
+    def set_open_status(self, open_status: bool) -> None:
+        """Set the report's status to open (True) or closed (False)
+
+        Args:
+            open_status:    whether the report is currently opened in the browser (True) or not (False)
+        """
+        self.is_open = open_status
+
+    # TODO: move to paths in second pass
+    def add_processed_file(self, processed: str) -> None:
+        """Add a file to the record of processed files.
+
+        Args:
+            processed:  the path to the processed file
+
+        """
+        self.processed_files.append(processed)
+
+
+
 
 # TODO config?
 
