@@ -2,11 +2,116 @@ import pathlib
 import re
 import unittest
 
+from collections import namedtuple
+
 import numpy as np
 import pandas as pd
 import pytest
 
 import seq_mon
+
+class TestCoverReport(unittest.TestCase):
+    test_dir = pathlib.Path(__file__).parent / "data" / "workflow_table" / "rundir" / "test_dir" / "fastq_pass"
+    test_df = pd.DataFrame(data={"sample_id": ["test1", "test2", "test3", "test4"],
+                                         "barcode": ["RB01", "RB02", "RB03", "RB04"],
+                                         "reference": ["nCoV-2019.reference.fa", "nCoV-2019.reference.fa",
+                                                       "nCoV-2019.reference.fa", "nCoV-2019.reference.fa"],
+                                         "ct": ["10", "20", "30", np.nan],
+                                         "other_columns1": ["A", "B", "C", "D"],
+                                         "other_columns2": ["1", "2", "3", "4"],
+                                         "barcode_path": [str(test_dir / "barcode01"),
+                                                          str(test_dir / "barcode02"),
+                                                          str(test_dir / "barcode03"),
+                                                          str(test_dir / "barcode04")],
+                                         "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
+                                         })
+    test_outdir = str(pathlib.Path(__file__).parent / "data" / "out_dir")
+    test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir")
+
+    def test_sense_check_thresholds(self):
+        """Fail if maximum coverage reported is below minimum coverage."""
+        error_msg = "Highest reported coverage must exceed minimum required coverage."
+        with pytest.raises(ValueError, match = re.escape(error_msg)):
+            seq_mon.CoverReport(workflow_table=self.test_df, threshold=100, maxDepth=10,
+                                              reference=self.test_ref, out_base=self.test_outdir)
+
+    def test_initialize_report(self):
+        """Initialize a CoverReport."""
+        test_report = seq_mon.CoverReport(workflow_table = self.test_df, threshold = 10, maxDepth = 100,
+                                          reference = self.test_ref, out_base = self.test_outdir)
+        pd.testing.assert_frame_equal(test_report.workflow_table, self.test_df)
+        assert 10 == test_report.threshold
+        assert 100 == test_report.maxDepth
+        assert pathlib.Path(self.test_outdir) == test_report.out_base
+        assert pathlib.Path(self.test_ref) == test_report.reference
+        assert len(test_report.processed_files) == 0
+        assert not test_report.is_open
+
+    def test_set_report_open_status(self):
+        """Set the CoverReport to open/closed."""
+        test_report = seq_mon.CoverReport(workflow_table=self.test_df, threshold=10, maxDepth=100,
+                                          reference=self.test_ref, out_base=self.test_outdir)
+        test_report.set_open_status(True)
+        assert test_report.is_open
+        test_report.set_open_status(False)
+        assert not test_report.is_open
+
+    def test_update_processed_files(self):
+        """Update the processed files."""
+        test_report = seq_mon.CoverReport(workflow_table=self.test_df, threshold=10, maxDepth=100,
+                                          reference=self.test_ref, out_base=self.test_outdir)
+        test_2 = seq_mon.CoverReport(workflow_table=self.test_df, threshold=10, maxDepth=100,
+                                          reference=self.test_ref, out_base=self.test_outdir)
+        assert len(test_report.processed_files) == 0
+        assert len(test_2.processed_files) == 0
+        test_report.add_processed_file("path/to/processed.fq")
+        assert len(test_report.processed_files) == 1
+        assert test_report.processed_files[0] == "path/to/processed.fq"
+        assert len(test_2.processed_files) == 0
+
+
+    def test_equality(self):
+        """Compare two CoverReports."""
+        test_report = seq_mon.CoverReport(workflow_table=self.test_df, threshold=10, maxDepth=100,
+                                          reference=self.test_ref, out_base=self.test_outdir)
+        test_2 = seq_mon.CoverReport(workflow_table=self.test_df, threshold=10, maxDepth=100,
+                                          reference=self.test_ref, out_base=self.test_outdir)
+        assert test_report == test_2
+        test_2.set_open_status(True)
+        assert test_report != test_2
+        test_2.set_open_status(False)
+        assert test_report == test_2
+        test_report.add_processed_file("path/to/processed.fq")
+        assert test_report != test_2
+
+    def test_compare_class(self):
+        """Compare a CoverReport with a different class."""
+        test_report = seq_mon.CoverReport(workflow_table=self.test_df, threshold=10, maxDepth=100,
+                                          reference=self.test_ref, out_base=self.test_outdir)
+        TupleReport = namedtuple("TupleReport",
+                                 ["workflow_table", "threshold", "maxDepth", "reference", "out_base",
+                                  "is_open", "processed_files"])
+        test_tuple = TupleReport(workflow_table=self.test_df, threshold=10, maxDepth=100,
+                                 reference=self.test_ref, out_base=self.test_outdir, is_open=False, processed_files=[])
+        assert test_tuple != test_report
+
+    def test_repr(self):
+        """Print the CoverReport."""
+        expected_str = (f"CoverReport(threshold=10, maxDepth=100, reference={self.test_ref},"
+                        f" out_base={self.test_outdir}, processed_files=[], is_open=False)\n"
+                        f"Workflow table:\n{self.test_df.head().to_string()}")
+        test_report = seq_mon.CoverReport(workflow_table=self.test_df, threshold=10, maxDepth=100,
+                                          reference=self.test_ref, out_base=self.test_outdir)
+        test_str = test_report.__repr__()
+        assert expected_str == test_str
+        expected_processed = (f"CoverReport(threshold=10, maxDepth=100, reference={self.test_ref},"
+                              f" out_base={self.test_outdir}, "
+                              "processed_files=['path/to/processed_1.fq', 'path/to/processed_2.fq'], is_open=False)\n"
+                              f"Workflow table:\n{self.test_df.head().to_string()}")
+        test_report.add_processed_file("path/to/processed_1.fq")
+        test_report.add_processed_file("path/to/processed_2.fq")
+        test_processed = test_report.__repr__()
+        assert expected_processed == test_processed
 
 class TestWriteToProcessed(unittest.TestCase):
     outdir = pathlib.Path(__file__).parent / "data" / "out_dir"
