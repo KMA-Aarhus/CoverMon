@@ -1,23 +1,26 @@
 __author__ = "Tine Sneibjerg Ebsen, Kat Steinke"
 __version__ = "0.3"
 
-import sys
-import os
-from os import listdir
-from os.path import isfile, isdir, join, exists
-import pandas as pd
-import numpy as np
-import subprocess
 import glob
+import os
+import subprocess
+import sys
 import time
 
-# new imports
 from argparse import ArgumentParser
+from os import listdir
+from os.path import isfile, isdir, join, exists
 from pathlib import Path
+
+
+import pandas as pd
+import numpy as np
 
 # TODO add convenience wait function?
 
 # TODO: create a run object to carry all of the information?
+
+# TODO config?
 
 # TODO move the helpers out so we can test them individually
 def parse_samplesheet(samplesheet: str) -> pd.DataFrame:
@@ -43,7 +46,7 @@ def parse_samplesheet(samplesheet: str) -> pd.DataFrame:
     elif samplesheet_extension == "xls":
         df = pd.read_excel(samplesheet)
     else:
-        raise Exception(f"The spreadsheet must be excel formatted (.xlsx or .xls)")  # TODO raise more specifically?
+        raise Exception("The spreadsheet must be excel formatted (.xlsx or .xls)")  # TODO raise more specifically?
 
     # Clean up the spreadsheet
     print("Cleaning sample sheet ...                              ", end="", flush=True)
@@ -57,7 +60,7 @@ def parse_samplesheet(samplesheet: str) -> pd.DataFrame:
     print(df)
     return df
 
-
+# TODO: lots of prints that could be logging instead
 def validate_samplesheet(samplesheet: pd.DataFrame, ref_is_file: bool) -> None:  # TODO: might be nicer with a bool output
     """Check that the sample sheet contains the correct barcodes and no duplicates, and all columns are present
 
@@ -76,7 +79,9 @@ def validate_samplesheet(samplesheet: pd.DataFrame, ref_is_file: bool) -> None: 
         print("Checking that the necessary columns exist ...          ", end = "", flush = True)
         for i in ["barcode", "reference","sample_id"]:  # TODO we probably also want to check this when we don't have a reference column
             if not i in samplesheet.columns:
-                raise Exception(f"The sample sheet is missing a necessary column. The sample sheet must contain the column {i}, but it only contains {samplesheet.columns.tolist()}")
+                raise Exception("The sample sheet is missing a necessary column. "
+                                f"The sample sheet must contain the column {i}, "
+                                f"but it only contains {sorted(samplesheet.columns.tolist())}")
         print("✓")
     # Check that the barcodes look correct
     acceptable_barcodes = [f"NB{i:02d}" for i in range(1,97)] + [f"RB{i:02d}" for i in range(1,97)]
@@ -85,7 +90,8 @@ def validate_samplesheet(samplesheet: pd.DataFrame, ref_is_file: bool) -> None: 
 
     for i in samplesheet["barcode"]:  # TODO catch all broken barcodes at once
         if not i in acceptable_barcodes:
-            raise Exception(f"The given barcode ", i, " is not an acceptable barcode. Here is a list of acceptable barcodes for inspiration:{nl} {' '.join(acceptable_barcodes)}")
+            raise Exception(f"The given barcode {i} is not an acceptable barcode. "
+                            f"Here is a list of acceptable barcodes for inspiration:\n{' '.join(acceptable_barcodes)}")
     print("✓")
 
 
@@ -94,8 +100,7 @@ def validate_samplesheet(samplesheet: pd.DataFrame, ref_is_file: bool) -> None: 
         bc_counts = pd.DataFrame(samplesheet['barcode'].value_counts())
         bc_counts.columns = ["count"]
         bc_counts = bc_counts[bc_counts["count"] > 1]
-        #print(nl, bc_counts)
-        raise Exception(f"{nl}One or more barcodes are duplicated. Each barcode may only be used once:{nl}{bc_counts}")
+        raise Exception(f"\nOne or more barcodes are duplicated. Each barcode may only be used once:\n{bc_counts}")
     print("✓")
 
     print()
@@ -125,7 +130,7 @@ def validate_rundir(rundir: str) -> tuple[str, str]:
 
     print("Checking that the rundir exists ...                    ", end = "", flush = True)
     if not os.path.isdir(rundir):
-        raise Exception(f"The rundir does not exist.")
+        raise Exception("The rundir does not exist.")
     print("✓")
 
     print(f"Looking for MinKNOW-characteristic output:") #, end = "", flush = True)
@@ -147,18 +152,21 @@ def validate_rundir(rundir: str) -> tuple[str, str]:
 
 
     if not len(fastq_pass_bases) == 1:  # TODO: can we just borrow SnakeAmp's get_fastq_pass_parent? That could cope with multiple fastq_pass dirs if you give it the one you want explicitly
-        raise Exception(f"There seems to be more than one fastq_pass sub-directory beneath the given rundir. These paths were found:{nl} {str(nl + ' ').join(fastq_pass_bases)}{nl}Please specify a more specific rundir.")
+        raise Exception("There seems to be more than one fastq_pass sub-directory beneath the given rundir."
+                        " These paths were found:\n"
+                        f" {'\n '.join(fastq_pass_bases)}\n"
+                        "Please specify a more specific rundir.")
 
 
     fastq_pass_base = fastq_pass_bases[0]
     del fastq_pass_bases
-    print(f"Found the following fastq_pass base which will be given to CoverMon: {nl}  {fastq_pass_base}{nl}")
+    print(f"Found the following fastq_pass base which will be given to CoverMon: \n  {fastq_pass_base}\n")
 
 
     # base_dir is the place where fastq_pass, fast5_pass and the sequencing summary resides.
     # TODO pathlib can do a lot of cleaning on these things;
     base_dir = os.path.dirname(fastq_pass_base) # This only works because there is NOT a trailing slash on the fastq_pass_base
-    print(f"This is the batch base directory:{nl}  {base_dir}")
+    print(f"This is the batch base directory:\n  {base_dir}")
 
     return base_dir, fastq_pass_base
 
@@ -188,11 +196,16 @@ def create_workflow_table(samplesheet: pd.DataFrame, fastq_pass_dir: str) -> pd.
     else:
         raise Exception(f"Barcodes in samplesheet are not acceptable")
 
+    # ensure consistent column format
+    sample_cols = samplesheet.columns.tolist()
+    barcode_cols = ["barcode_path", "barcode_basename"]
+    out_cols = [*sample_cols, *barcode_cols]
+
     print("Continuing with the following barcodes:")
 
     # the workflow_table is the table that contains the records where the barcode could be found on the disk.
     workflow_table = disk_barcodes_df.merge(samplesheet, how='left', on='barcode') # left join (merge) the present barcodes onto the df table.
-    workflow_table = workflow_table.dropna(subset = ["sample_id"])
+    workflow_table = workflow_table.dropna(subset = ["sample_id"]).reindex(columns = out_cols)
 
     print(workflow_table)
     print("//")
@@ -207,12 +220,10 @@ def write_to_processed(to_write: str, out_dir: str) -> None:
         out_dir:  the base directory in which to write to the file
 
     """
-    nl = "\n"
-    processed_files_txt = open(f"{out_dir}/processed_files.txt","a")
-    processed_files_txt.write(f"{to_write}{nl}")
-    processed_files_txt.close()
+    with open(f"{out_dir}/processed_files.txt","a", encoding = "utf-8") as processed_files_txt:
+        processed_files_txt.write(f"{to_write}\n")
 
-# TODO: ALL OF THE VARS here, let's feed this an object
+
 
 def update_plot(workflow_table, reference, samplesheet, open_report):
     # TODO: allow for different outfiles here
@@ -272,6 +283,7 @@ def update_plot(workflow_table, reference, samplesheet, open_report):
             print(plot_cov_cmd2.split())
             subprocess.run(plot_cov_cmd2.split())
             # TODO: make this a script of its own so we can run it more nicely
+            # TODO: ensure it writes to a unique file for each run
             plot_cov_cmd3 = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
                              "params = list(threshold = ", threshold, ", maxDepth= ", maxDepth, ", path = ",
                              "\'" + out_base + "\', samplesheet = ", "\'" + samplesheet + "\', region_file = ",
@@ -403,6 +415,7 @@ def start_covermon():
         open_report = update_plot(workflow_table, reference, sample_sheet_out,open_report)
 
         # Continue the monitor as long as the sequence summary does not exist. Wait <seconds_wait> between scans.
+        # TODO: rework this so we can rerun/run in parallel
         sequencing_summary_file = glob.glob(base_dir + "/sequencing_summary_*.txt")
         if len(sequencing_summary_file) == 0:
             print(f"  Still sequencing/basecalling; waiting {seconds_wait} seconds before next scan ...")
