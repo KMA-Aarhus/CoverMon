@@ -596,9 +596,9 @@ class TestUpdatePlot(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
             assert not ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
         assert test_report.is_open
-        expected_processed = [str(self.test_dir / "barcode01" / "barcode01-0.fastq.gz"),
-                              str(self.test_dir / "barcode02" / "barcode02_0.fastq.gz"),
-                              str(self.test_dir / "barcode02" / "barcode02_1.fastq.gz")]
+        expected_processed = [self.test_dir / "barcode01" / "barcode01-0.fastq.gz",
+                              self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
+                              self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
         mock_run.assert_has_calls([plot_call])
 
@@ -637,9 +637,9 @@ class TestUpdatePlot(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
         assert test_report.is_open
-        expected_processed = [str(self.test_dir / "barcode01" / "barcode01-0.fastq.gz"),
-                              str(self.test_dir / "barcode02" / "barcode02_0.fastq.gz"),
-                              str(self.test_dir / "barcode02" / "barcode02_1.fastq.gz")]
+        expected_processed = [self.test_dir / "barcode01" / "barcode01-0.fastq.gz",
+                              self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
+                              self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
         mock_run.assert_has_calls([plot_call])
 
@@ -680,8 +680,8 @@ class TestUpdatePlot(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
         assert test_report.is_open
-        expected_processed = [str(self.test_dir / "barcode01" / "barcode01-0.fastq.gz"),
-                              str(self.test_dir / "barcode02" / "barcode02_0.fastq.gz"),
-                              str(self.test_dir / "barcode02" / "barcode02_1.fastq.gz")]
+        expected_processed = [self.test_dir / "barcode01" / "barcode01-0.fastq.gz",
+                              self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
+                              self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
         mock_run.assert_has_calls([plot_call])

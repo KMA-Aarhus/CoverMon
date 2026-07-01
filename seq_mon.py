@@ -423,14 +423,14 @@ def update_plot(active_report: CoverReport):
     for index, row in workflow_table.iterrows():
         bam_out = out_base / f"{row['barcode']}.bam"
         depth =  out_base / f"{row['barcode']}.depth"
-        barcode_path = row['barcode_path']  # TODO pathlib-based handling here
+        barcode_path = pathlib.Path(row['barcode_path'])
         if active_report.reference.is_dir():
             reference = active_report.reference / row['reference']
         else:
             reference = active_report.reference
-        unprocessed = [barcode_path + "/" + f for f in listdir(barcode_path) if
-                       (barcode_path + "/" + f not in active_report.processed_files and isfile(join(barcode_path, f))
-                        and (f.endswith(".fastq") or f.endswith(".fastq.gz")))]  # TODO we can do this more nicely in pathlib
+        unprocessed = [f.resolve() for f in barcode_path.iterdir() if
+                       (f.resolve() not in active_report.processed_files and f.is_file()
+                        and {".fastq", ".fq"}.intersection(f.suffixes))]
 
         for f in unprocessed:
             # Check if we have an existing read mapping to append to. If not, creates the first one and continues the loop without merging.
