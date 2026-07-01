@@ -1,8 +1,10 @@
+import logging
 import pathlib
 import re
 import unittest
 
 from collections import namedtuple
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -141,9 +143,6 @@ class TestCoverReport(unittest.TestCase):
                         f" reference={self.test_ref}, region_file=None,"
                         f" out_base={self.test_outdir}, processed_files=[], is_open=False)\n"
                         f"Workflow table:\n{self.test_df.head().to_string()}")
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, threshold=10, maxDepth=100,
-                                          reference=self.test_ref, out_base=self.test_outdir,
-                                          sample_sheet=self.test_samplesheet)
         test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         test_str = test_report.__repr__()
@@ -168,6 +167,96 @@ class TestCoverReport(unittest.TestCase):
                                             region_file=test_region)
         region_str = region_report.__repr__()
         assert expected_region == region_str
+
+
+class TestCreateBam(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
+    # mock subprocess run here
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    def test_success(self, mock_run):
+        """Create a new bam file."""
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        out_base = pathlib.Path(__file__).parent / "data" / "out_dir"
+        test_out_sam = str(out_base / "tmp.sam")
+        test_out_bam = out_base / "barcode01.bam"
+        test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa"
+        test_file = 'path/to/processed_1.fq'
+        # log the commands and the bit where we're creating a new file
+        map_log = f"minimap2 -a -o {test_out_sam} {str(test_ref)} {test_file}"
+        new_bam = "Creating initial bam"
+        bam_log = f"samtools sort -O bam -o {test_out_bam} {test_out_sam}"
+        map_call = mock.call(map_log.split(), check=True)
+        bam_call = mock.call(bam_log.split(), check=True)
+        with self._caplog.at_level(logging.DEBUG, logger = "seq_mon"):
+            seq_mon.create_bam(test_file, out_base, test_out_bam, test_ref)
+            assert ("seq_mon", logging.DEBUG, map_log) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, new_bam) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, bam_log) in self._caplog.record_tuples
+        mock_run.assert_has_calls([map_call, bam_call])
+
+
+
+class TestAppendBam(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
+    # mock subprocess run here
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    def test_success(self, mock_run):
+        """Append to an existing bam file."""
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        out_base = pathlib.Path(__file__).parent / "data" / "out_dir"
+        test_out_sam = str(out_base / "tmp.sam")
+        test_out_bam = out_base / "barcode01.bam"
+        test_out_sorted = str(out_base / "sorted.bam")
+        test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa"
+        test_file = 'path/to/processed_1.fq'
+        map_log = f"minimap2 -a -o {test_out_sam} {str(test_ref)} {test_file}"
+        bam_log = f"samtools sort -O bam -o {test_out_sorted} {test_out_sam}"
+        merge_log = f"samtools merge -f -o {str(out_base / 'tmp.bam')} {test_out_sorted} {test_out_bam}"
+        map_call = mock.call(map_log.split(), check=True)
+        bam_call = mock.call(bam_log.split(), check=True)
+        merge_call = mock.call(merge_log.split(),  check=True)
+        move_call = mock.call(['mv',
+                               pathlib.PosixPath('/Users/kat/PycharmProjects/CoverMon/tests/data/out_dir/tmp.bam'),
+                               pathlib.PosixPath('/Users/kat/PycharmProjects/CoverMon/tests/data/out_dir/barcode01.bam')],
+                               check=True)
+        with self._caplog.at_level(logging.DEBUG, logger = "seq_mon"):
+            seq_mon.append_bam(test_file, out_base, test_out_bam, test_ref)
+            print(self._caplog.record_tuples)
+            assert ("seq_mon", logging.DEBUG, map_log) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, bam_log) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, merge_log) in self._caplog.record_tuples
+        mock_run.assert_has_calls([map_call, bam_call, merge_call, move_call])
+
+
+class TestGetDepths(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
+    # mock subprocess run here
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    def test_success(self, mock_run):
+        """Get depths for an existing bam file."""
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        out_base = pathlib.Path(__file__).parent / "data" / "out_dir"
+        test_out_bam = out_base / "barcode01.bam"
+        test_out_depth = out_base / "barcode01.depth"
+        index_log = f"samtools index {test_out_bam}"
+        depth_log = f"samtools depth -aa {test_out_bam} -o {test_out_depth}"
+        index_call = mock.call(index_log.split(), check=True)
+        depth_call = mock.call(depth_log.split(), check=True)
+        with self._caplog.at_level(logging.DEBUG, logger = "seq_mon"):
+            seq_mon.get_depth(test_out_bam, test_out_depth)
+            assert ("seq_mon", logging.DEBUG, index_log) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, depth_log) in self._caplog.record_tuples
+        mock_run.assert_has_calls([index_call, depth_call])
+
 
 class TestWriteToProcessed(unittest.TestCase):
     outdir = pathlib.Path(__file__).parent / "data" / "out_dir"
@@ -436,3 +525,163 @@ class TestCreateWorkflowTable(unittest.TestCase):
         test_result = seq_mon.create_workflow_table(test_df, str(self.test_dir))
         pd.testing.assert_frame_equal(expected_df, test_result)
 
+
+# TODO: make this nicer
+def bam_creator(*args) -> None:
+    """Create bam files for testing"""
+    test_outdir =  pathlib.Path(__file__).parent / "data" / "out_dir"
+    for bam in [test_outdir / "RB01.bam", test_outdir / "RB02.bam"]:
+        bam.touch()
+
+class TestUpdatePlot(unittest.TestCase):
+    test_dir = pathlib.Path(__file__).parent / "data" / "workflow_table" / "rundir" / "test_dir" / "fastq_pass"
+    test_df = pd.DataFrame(data={"sample_id": ["test1", "test2"],
+                                 "barcode": ["RB01", "RB02"],
+                                 "reference": ["nCoV-2019.reference.fa", "nCoV-2019.reference.fa"],
+                                 "ct": ["10", "20"],
+                                 "other_columns1": ["A", "B"],
+                                 "other_columns2": ["1", "2",],
+                                 "barcode_path": [str(test_dir / "barcode01"),
+                                                  str(test_dir / "barcode02")],
+                                 "barcode_basename": ["barcode01", "barcode02"]
+                                 })
+    test_outdir =  pathlib.Path(__file__).parent / "data" / "out_dir"
+    test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir")
+    test_samplesheet = str(pathlib.Path(__file__).parent / "data" / "samplesheet.xls")
+
+    def tearDown(self):
+        to_clean = [self.test_outdir / "RB01.bam", self.test_outdir / "RB02.bam",
+                    self.test_outdir / "RB01.depth", self.test_outdir / "RB02.depth"]
+        for test_file in to_clean:
+            if test_file.exists():
+                test_file.unlink()
+
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
+
+    # TODO: mock create_bam to only touch the bam file
+    # TODO mock subprocess
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    @mock.patch(f"{seq_mon.__name__}.create_bam")
+    def test_success_already_opened(self, mock_create_bam, mock_run):
+        """Successfully update the plot when the browser is already open"""
+        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=self.test_ref, out_base=str(self.test_outdir))
+        test_report.set_open_status(True)
+        assert test_report.is_open
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        mock_create_bam.side_effect = bam_creator
+        scanning = "Scanning for new fastq files..."
+        barcode1_process1 = "Number of processed files: 1"
+        barcode2_process1 = "Number of processed files: 2"
+        barcode2_process2 = "Number of processed files: 3"
+        report_status = "Updated plot"
+        opening_file = "Opening report"
+        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
+                             "params = list(threshold = ", "10",
+                             ", maxDepth= ", "100", ", path = ",
+                             "\'" + str(self.test_outdir) + "\', samplesheet = ", "\'" + self.test_samplesheet + "\', region_file = ",
+                             "\'" + "" + "\'))\""]
+        plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
+        with self._caplog.at_level(logging.DEBUG, logger = "seq_mon"):
+            seq_mon.update_plot(test_report)
+            assert ("seq_mon", logging.INFO, scanning) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, barcode1_process1) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, barcode2_process1) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, barcode2_process2) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, report_status) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
+            assert not ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
+        assert test_report.is_open
+        expected_processed = [str(self.test_dir / "barcode01" / "barcode01-0.fastq.gz"),
+                              str(self.test_dir / "barcode02" / "barcode02_0.fastq.gz"),
+                              str(self.test_dir / "barcode02" / "barcode02_1.fastq.gz")]
+        assert sorted(expected_processed) == sorted(test_report.processed_files)
+        mock_run.assert_has_calls([plot_call])
+
+
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    @mock.patch(f"{seq_mon.__name__}.create_bam")
+    def test_success_open_window(self, mock_create_bam, mock_run):
+        """Successfully update the plot when the browser is not yet open; update report status"""
+        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=self.test_ref, out_base=str(self.test_outdir))
+        assert not test_report.is_open
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        mock_create_bam.side_effect = bam_creator
+        scanning = "Scanning for new fastq files..."
+        barcode1_process1 = "Number of processed files: 1"
+        barcode2_process1 = "Number of processed files: 2"
+        barcode2_process2 = "Number of processed files: 3"
+        report_status = "Updated plot"
+        opening_file = "Opening report"
+        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
+                    "params = list(threshold = ", "10",
+                    ", maxDepth= ", "100", ", path = ",
+                    "\'" + str(self.test_outdir) + "\', samplesheet = ",
+                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + "" + "\'))\""]
+        plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
+        with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
+            seq_mon.update_plot(test_report)
+            assert ("seq_mon", logging.INFO, scanning) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, barcode1_process1) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, barcode2_process1) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, barcode2_process2) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, report_status) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
+        assert test_report.is_open
+        expected_processed = [str(self.test_dir / "barcode01" / "barcode01-0.fastq.gz"),
+                              str(self.test_dir / "barcode02" / "barcode02_0.fastq.gz"),
+                              str(self.test_dir / "barcode02" / "barcode02_1.fastq.gz")]
+        assert sorted(expected_processed) == sorted(test_report.processed_files)
+        mock_run.assert_has_calls([plot_call])
+
+
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    @mock.patch(f"{seq_mon.__name__}.create_bam")
+    def test_success_single_ref(self, mock_create_bam, mock_run):
+        """Update the plot when we're using a single reference and a region file"""
+        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=f"{self.test_ref}/test_ref.fa",
+                                          region_file=f"{self.test_ref}/test_region.bed",
+                                          out_base=str(self.test_outdir))
+        assert not test_report.is_open
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        mock_create_bam.side_effect = bam_creator
+        scanning = "Scanning for new fastq files..."
+        barcode1_process1 = "Number of processed files: 1"
+        barcode2_process1 = "Number of processed files: 2"
+        barcode2_process2 = "Number of processed files: 3"
+        report_status = "Updated plot"
+        opening_file = "Opening report"
+        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
+                    "params = list(threshold = ", "10",
+                    ", maxDepth= ", "100", ", path = ",
+                    "\'" + str(self.test_outdir) + "\', samplesheet = ",
+                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + f"{self.test_ref}/test_region.bed" + "\'))\""]
+        plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
+        with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
+            seq_mon.update_plot(test_report)
+            assert ("seq_mon", logging.INFO, scanning) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, barcode1_process1) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, barcode2_process1) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, barcode2_process2) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, report_status) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
+            assert ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
+        assert test_report.is_open
+        expected_processed = [str(self.test_dir / "barcode01" / "barcode01-0.fastq.gz"),
+                              str(self.test_dir / "barcode02" / "barcode02_0.fastq.gz"),
+                              str(self.test_dir / "barcode02" / "barcode02_1.fastq.gz")]
+        assert sorted(expected_processed) == sorted(test_report.processed_files)
+        mock_run.assert_has_calls([plot_call])
