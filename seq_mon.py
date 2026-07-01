@@ -2,6 +2,7 @@ __author__ = "Tine Sneibjerg Ebsen, Kat Steinke"
 __version__ = "0.3"
 
 import glob
+import logging
 import os
 import pathlib
 import subprocess
@@ -16,6 +17,11 @@ from typing import Optional
 
 import pandas as pd
 import numpy as np
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+console_log = logging.StreamHandler()
+logger.addHandler(console_log)
 
 # TODO add convenience wait function?
 
@@ -108,6 +114,7 @@ class CoverReport:
         """
         self.processed_files.append(processed)
 
+    # TODO bulk add processed files from file
 
 
 
@@ -315,85 +322,158 @@ def write_to_processed(to_write: str, out_dir: str) -> None:
         processed_files_txt.write(f"{to_write}\n")
 
 
+# TODO split subcommands out:
+#  - create bam
+#  - append bam
+#  - index and get depths
+#  - eventually we want to split plot_cov out as well
+def create_bam(fastq: str, out_base: pathlib.Path, out_bam: pathlib.Path, reference: pathlib.Path)\
+        -> None:
+    """Align a fastq file for a new barcode to the reference and output results.
 
-def update_plot(workflow_table, reference, samplesheet, open_report):
-    # TODO: allow for different outfiles here
+    Args:
+        out_bam:
+        fastq:      the fastq file to process
+        out_base:   the output directory to write results to
+        reference:  the reference file to align the fastq to
+
+    """
+    tmpsam = out_base / "tmp.sam"
+    map_cmd = f"minimap2 -a -o {tmpsam} {reference} {fastq}"
+    logger.debug(map_cmd)
+    map_process = subprocess.run(map_cmd.split(), check = True)
+    sam2bam = f'samtools sort -O bam -o {out_bam} {tmpsam}'
+    logger.info("Creating initial bam")
+    logger.debug(sam2bam)
+    subprocess.run(sam2bam.split(), check = True)
+
+
+def append_bam(fastq: str, out_base: pathlib.Path, out_bam: pathlib.Path, reference: pathlib.Path)\
+        -> None:
+    """Append alignment of new fastqs for an existing barcode to existing results
+
+    Args:
+        fastq:      the fastq file to process
+        out_base:   the output directory to write results to
+        out_bam:    the bam file to combine results with
+        reference:  the reference file to align the fastq to
+    """
+    tmpsam = out_base / "tmp.sam"
+    tmpbam = out_base / "tmp.bam"
+    map_cmd = f"minimap2 -a -o {tmpsam} {reference} {fastq}"
+    logger.debug(map_cmd)
+    subprocess.run(map_cmd.split(), check = True)
+    # Sort the mapping files for merging
+    sort_cmd = f'samtools sort -O bam -o {out_base}/sorted.bam {tmpsam}'  # TODO keep in mind when allowing more
+    logger.debug(sort_cmd)
+    subprocess.run(sort_cmd.split(), check = True)
+    # Merges the sorted files
+    merge_cmd = f'samtools merge -f -o {tmpbam} {out_base}/sorted.bam {out_bam}'
+    logger.debug(merge_cmd)
+    subprocess.run(merge_cmd.split(), check = True)
+    # Sets the new bam to the barcode bam and marks file as processed
+    subprocess.run(['mv', tmpbam, out_bam], check = True)  # TODO keep in mind when moving
+
+
+def get_depth(bam: pathlib.Path, depth_out: pathlib.Path) -> None:
+    """Get depths based on bam file
+
+    Args:
+        bam:        the bam file to process
+        depth_out:  the depth file to write to
+
+    """
+    plot_cov_cmd1 = 'samtools index ' + str(bam)
+    plot_cov_cmd2 = f'samtools depth -aa {bam} -o {depth_out}'
+
+    logger.debug(plot_cov_cmd1)
+    subprocess.run(plot_cov_cmd1.split(), check = True)
+    logger.debug(plot_cov_cmd2)
+    subprocess.run(plot_cov_cmd2.split(), check = True)
+
+
+# TODO: ALL OF THE VARS here, let's feed this an object specifying report params
+# We need:
+# already specified as args:
+# - workflow_table - mapping of fastq pass dirs to barcodes, could be attached to the report instead
+# - reference - reference file/dir if given (attach to report, build the per-line ref path?)
+# - samplesheet: path to sample sheet
+# - open_report: whether the report is open or not - could attach that to the CoverReport?
+
+# used to be in the main function
+# - out_base: the output base dir (attach to report?)
+# - one_ref: whether the ref is a file or a dir - maybe just go off the CoverReport's reference, if that is_dir or not
+# - refdir: replace with CoverReport.reference
+# - processed_files: attach to CoverReport?
+# - threshold: attach to CoverReport - take from config in the future?
+# - maxDepth: attach to CoverReport - take from config in the future?
+# - region_file: attach to CoverReport
+def update_plot(active_report: CoverReport):
+    """Create or update the coverage plot for a given report and show plot in a browser window
+
+    Args:
+        active_report:  the CoverReport to plot
+    """
+    # TODO: allow for different outfiles here - everything needs a unique ID eventually
     # Define temporary mapping files which will be used for merging new mapping of new output files with existing
-    tmpsam = out_base + '/' + 'tmp.sam'
-    tmpbam = out_base + '/' + 'tmp.bam'
-    print("Scanning for new fastq files...")
+    workflow_table = active_report.workflow_table.copy(deep=True)
+    out_base = active_report.out_base
+    logger.info("Scanning for new fastq files...")
+    # TODO: can we do bam_out, depth, outside of the loop at least?
     for index, row in workflow_table.iterrows():
-        bam_out = out_base + "/" + row['barcode'] + ".bam"
-        depth = out_base + "/" + row['barcode'] + ".depth"
-        barcode_path = row['barcode_path']
-        if not one_ref:
-            reference = refdir + "/" + row['reference']
+        bam_out = out_base / f"{row['barcode']}.bam"
+        depth =  out_base / f"{row['barcode']}.depth"
+        barcode_path = row['barcode_path']  # TODO pathlib-based handling here
+        if active_report.reference.is_dir():
+            reference = active_report.reference / row['reference']
+        else:
+            reference = active_report.reference
         unprocessed = [barcode_path + "/" + f for f in listdir(barcode_path) if
-                       (barcode_path + "/" + f not in processed_files and isfile(join(barcode_path, f)))]
+                       (barcode_path + "/" + f not in active_report.processed_files and isfile(join(barcode_path, f))
+                        and (f.endswith(".fastq") or f.endswith(".fastq.gz")))]  # TODO we can do this more nicely in pathlib
 
         for f in unprocessed:
             # Check if we have an existing read mapping to append to. If not, creates the first one and continues the loop without merging.
             if not exists(bam_out):
-                map_cmd = f"minimap2 -a -o {tmpsam} {reference} {f}"
-                print(map_cmd)
-                subprocess.run(map_cmd.split())
-                sam2bam = f'samtools sort -O bam -o {bam_out} {tmpsam}'
-                print("Creating initial bam: ", sam2bam)
-                subprocess.run(sam2bam.split())
+                create_bam(f, out_base, bam_out, reference)
+                active_report.add_processed_file(f)
+                write_to_processed(f, str(out_base))
 
-                processed_files.append(f)
-                write_to_processed(f, out_base)
-
-                print("Number of processed files: ", len(processed_files))
+                logger.info(f"Number of processed files: {len(active_report.processed_files)}")
             else:
                 # Maps new reads to reference
-                map_cmd = f"minimap2 -a -o {tmpsam} {reference} {f}"
-                print(map_cmd)
-                subprocess.run(map_cmd.split())
-                # Sort the mapping files for merging
-                sort_cmd = f'samtools sort -O bam -o {out_base}/sorted.bam {tmpsam}'
-                print(sort_cmd)
-                subprocess.run(sort_cmd.split())
-                # Merges the sorted files
-                merge_cmd = f'samtools merge -f -o {tmpbam} {out_base}/sorted.bam {bam_out}'
-                print(merge_cmd)
-                subprocess.run(merge_cmd.split())
-                # Sets the new bam to the barcode bam and marks file as processed
-                subprocess.run(['mv', tmpbam, bam_out])
-                processed_files.append(f)
-                write_to_processed(f, out_base)
+                append_bam(f, out_base, bam_out, reference)
+                active_report.add_processed_file(f)
+                write_to_processed(f, str(out_base))
 
-                print("Number of processed files: ", len(processed_files))
+                logger.info(f"Number of processed files: {len(active_report.processed_files)}")
             # Index the new bam and calculate depth. Then creates the monitoring html
-            plot_cov_cmd1 = f'samtools index ' + bam_out
-            plot_cov_cmd2 = f'samtools depth -aa {bam_out} -o {depth}'
+            get_depth(bam_out, depth)
             # Getting the below line to run was a pain. Hence, it is presented as a list.
-
-            print(plot_cov_cmd1.split())
-            subprocess.run(plot_cov_cmd1.split())
-            print(plot_cov_cmd2.split())
-            subprocess.run(plot_cov_cmd2.split())
             # TODO: make this a script of its own so we can run it more nicely
             # TODO: ensure it writes to a unique file for each run
-            plot_cov_cmd3 = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
-                             "params = list(threshold = ", threshold, ", maxDepth= ", maxDepth, ", path = ",
-                             "\'" + out_base + "\', samplesheet = ", "\'" + samplesheet + "\', region_file = ",
-                             "\'" + region_file + "\'))\""]
+            region_file = active_report.region_file if active_report.region_file else ""
+            plot_cov_cmd3 = ["Rscript", "-e", "\"rmarkdown::render(input = ", "'scripts/plot_cov.Rmd',",
+                             "params = list(threshold = ", str(active_report.threshold),
+                             ", maxDepth= ", str(active_report.maxDepth), ", path = ",
+                             "'" + str(out_base) + "', samplesheet = ", "'" + active_report.sample_sheet + "', region_file = ",
+                             "'" + region_file + "'))\""]
 
-            print(plot_cov_cmd3)
-            subprocess.run(" ".join(plot_cov_cmd3), shell=True)
+            logger.debug(" ".join(plot_cov_cmd3))
+            subprocess.run(" ".join(plot_cov_cmd3), shell=True, check = True)
             # TODO can't we output it somewhere else?
-            subprocess.run(['mv', 'scripts/plot_cov.html', out_base])
+            subprocess.run(['mv', 'scripts/plot_cov.html', out_base], check = True)
 
             # Starts browser-sync in a new terminal if the report is not open. This will not work on windows or macOS.
-            print("Updated plot, open_report = ", open_report)
-            if open_report == False:
-                print("open_report = ", open_report, ". Opening report")
+            logger.info("Updated plot")
+            if not active_report.is_open:
+                logger.info("Opening report")
                 subprocess.run(
-                    "gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + out_base + "\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"",
-                    shell=True)
-                open_report = True
-    return open_report
+                    "gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + str(out_base) + "\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"",
+                    shell=True,
+                check = True)
+                active_report.set_open_status(True)
+    #return open_report # TODO we don't need this anymore
 
 def start_covermon():
     tab = "\t"
