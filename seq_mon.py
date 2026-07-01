@@ -11,31 +11,13 @@ import time
 from argparse import ArgumentParser
 from os import listdir
 from os.path import isfile, isdir, join, exists
+from typing import Optional
 
 
 import pandas as pd
 import numpy as np
 
 # TODO add convenience wait function?
-
-# TODO: create a run object to carry all of the information?
-
-# TODO: ALL OF THE VARS here, let's feed this an object specifying report params
-# We need:
-# already specified as args:
-# - workflow_table - mapping of fastq pass dirs to barcodes, could be attached to the report instead
-# - reference - reference file/dir if given (attach to report, build the per-line ref path?)
-# - samplesheet: path to sample sheet
-# - open_report: whether the report is open or not - could attach that to the CoverReport?
-
-# used to be in the main function
-# - out_base: the output base dir (attach to report?)
-# - one_ref: whether the ref is a file or a dir - maybe just go off the CoverReport's reference, if that is_dir or not
-# - refdir: replace with CoverReport.reference
-# - processed_files: attach to CoverReport?
-# - threshold: attach to CoverReport - take from config in the future?
-# - maxDepth: attach to CoverReport - take from config in the future?
-# - region_file: attach to CoverReport
 
 class CoverReport:
     """A coverage report generated on the base of input data and parameters, written to an output directory,
@@ -49,9 +31,11 @@ class CoverReport:
         out_base:           output base directory
         is_open:            whether the report is currently opened in the browser
         processed_files:    the files processed by this instance of CoverMon
+        region_file:        path to bed file with regions in the reference
+                            (optional, only allowed if reference is a single file)
     """
-    def __init__(self, workflow_table: pd.DataFrame, sample_sheet: str, threshold: int, maxDepth: int,
-                 reference: str, out_base: str) \
+    def __init__(self, workflow_table: pd.DataFrame, sample_sheet: str, threshold: int, maxDepth: int, reference: str,
+                 out_base: str, region_file: Optional[str] = None) \
             -> None:
         """Initialize a CoverReport object.
 
@@ -62,12 +46,20 @@ class CoverReport:
             maxDepth:       maximum coverage reported
             reference:      reference file or directory
             out_base:       output base directory
+            region_file:    path to bed file with regions in the reference
+                            (optional, only allowed if reference is a single file)
 
         Raises:
-            ValueError  if the maximum reported coverage is lower than the minimum coverage required
+            ValueError  if the maximum reported coverage is lower than the minimum coverage required,
+                        or if a region file is given together with a reference base directory
+                        (=different references per sample)
         """
+        # sense checks first
         if threshold > maxDepth:
             raise ValueError("Highest reported coverage must exceed minimum required coverage.")
+        if pathlib.Path(reference).is_dir() and region_file is not None:
+            raise ValueError("Cannot supply a region file when different references per sample are used "
+                             "(base ref is a directory)")
         self.workflow_table = workflow_table
         self.sample_sheet = sample_sheet
         self.threshold = threshold
@@ -76,6 +68,7 @@ class CoverReport:
         self.out_base = pathlib.Path(out_base)
         self.is_open = False  # TODO: can we assume this?
         self.processed_files = []
+        self.region_file = region_file
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, CoverReport):
@@ -86,12 +79,14 @@ class CoverReport:
                      and self.out_base == other.out_base
                      and self.is_open == other.is_open
                      and self.processed_files == other.processed_files
-                     and self.workflow_table.equals(other.workflow_table)))
+                     and self.workflow_table.equals(other.workflow_table)
+                     and self.region_file == other.region_file))
         return False
 
     def __repr__(self):
         return(f"CoverReport(sample_sheet={self.sample_sheet}, threshold={self.threshold}, maxDepth={self.maxDepth},"
-               f" reference={self.reference}, out_base={self.out_base}, processed_files={self.processed_files},"
+               f" reference={self.reference}, region_file={self.region_file},"
+               f" out_base={self.out_base}, processed_files={self.processed_files},"
                f" is_open={self.is_open})\n"
                f"Workflow table:\n{self.workflow_table.head().to_string()}")
 
