@@ -627,6 +627,8 @@ class TestUpdatePlot(unittest.TestCase):
                     "\'" + "" + "\'))\""]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
+        open_cmd = "gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + str(self.test_outdir) + "\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\""
+        open_call = mock.call(open_cmd, shell=True, check=True)
         with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
             seq_mon.update_plot(test_report)
             assert ("seq_mon", logging.INFO, scanning) in self._caplog.record_tuples
@@ -641,7 +643,7 @@ class TestUpdatePlot(unittest.TestCase):
                               self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
                               self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
-        mock_run.assert_has_calls([plot_call])
+        mock_run.assert_has_calls([plot_call, open_call], any_order=True)
 
 
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
