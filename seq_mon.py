@@ -207,9 +207,10 @@ def validate_samplesheet(samplesheet: pd.DataFrame, ref_is_file: bool) -> None: 
     print("//")
     print()
 
-def validate_rundir(rundir: str) -> tuple[str, str]:
+def validate_rundir(rundir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     """Check whether the rundir exists, and find the fastq_pass directory and its parent dir, possibly waiting for
     the fastq_pass directory to be created.
+    Parts adapted from SnakeAmp.
 
     Args:
         rundir: the directory containing sequence data *somewhere*
@@ -217,59 +218,56 @@ def validate_rundir(rundir: str) -> tuple[str, str]:
     Returns:
         The parent directory of the fastq_pass directory and the fastq_pass directory
     Raises
-        Exception   if the rundir does not exist,
-                    if the fastq_pass directory was not found after the end of the waiting time,
-                    or if multiple fastq_pass directories were found
+        FileNotFoundError:  if the rundir does not exist,
+                            or if the fastq_pass directory was not found after the end of the waiting time,
+        ValueError:         if multiple fastq_pass directories were found
     """
-    if rundir[-1] == "/":
-        print("Removing trailing slash from rundir")
-        rundir = rundir[0:-1]
-
-
-    print("Checking that the rundir exists ...                    ", end = "", flush = True)
-    if not os.path.isdir(rundir):
-        raise Exception("The rundir does not exist.")
+    logger.info("Checking that the rundir exists ...                    ")
+    if not rundir.exists():
+        raise FileNotFoundError("The rundir does not exist.")
     print("✓")
-
-    print(f"Looking for MinKNOW-characteristic output:") #, end = "", flush = True)
+    existing_path = rundir.parts
+    logger.info("Looking for MinKNOW-characteristic output:") #, end = "", flush = True)
     # Wait for the rundir to occur in the specified path.
     # If it doesn't occur after a specified waiting time, then stop the p
     # TODO: convenience waiting function here?
-    for i in range(200):
-        print("  Looking ... ", end = "", flush = True)
-        fastq_pass_bases = glob.glob(rundir + "/**/fastq_pass", recursive = True) # Find any occurrence of the wanted path
-        if len(fastq_pass_bases) == 0:
-            print("nothing found yet, waiting 10 secs ...")
-            time.sleep(10) # Wait 10 seconds.
-        elif(i == 10):
-            print() # clean newline
-            raise Exception("nothing found after 10 tries. Aborting.")
-        else:
-            print(f"Found                                    ✓")
-            break
+    for i in range(10):
+        logger.info("  Looking ... ")
+        try:
+            # if the fastq_pass directory already is somewhere in the dirs given, use this
+            fastq_pass_parts = existing_path[:existing_path.index("fastq_pass") + 1]
+            # parts contains the initial "/" - resolve the path to clean this up
+            fastq_pass_base = pathlib.Path("/".join(fastq_pass_parts)).resolve()
+            # do we end with something that actually exists?
+        except ValueError:
+            logger.info(f"Searching for fastq_pass folder in {rundir}...")
+            fastq_pass_bases = list(rundir.glob("**/fastq_pass"))
+            if fastq_pass_bases:
+                if len(fastq_pass_bases) > 1:
+                    raise ValueError(("There seems to be more than one fastq_pass sub-directory beneath the given rundir."
+                            " These paths were found:\n"
+                            f" {'\n '.join([str(base) for base in fastq_pass_bases])}\n"
+                            "Please specify a more specific rundir."))
 
-
-    if not len(fastq_pass_bases) == 1:  # TODO: can we just borrow SnakeAmp's get_fastq_pass_parent? That could cope with multiple fastq_pass dirs if you give it the one you want explicitly
-        raise Exception("There seems to be more than one fastq_pass sub-directory beneath the given rundir."
-                        " These paths were found:\n"
-                        f" {'\n '.join(fastq_pass_bases)}\n"
-                        "Please specify a more specific rundir.")
-
-
-    fastq_pass_base = fastq_pass_bases[0]
-    del fastq_pass_bases
-    print(f"Found the following fastq_pass base which will be given to CoverMon: \n  {fastq_pass_base}\n")
+                fastq_pass_base = fastq_pass_bases[0]
+                logger.info(f"Found                                    ✓")
+            else:
+                if i < 10:
+                    logger.info("nothing found yet, waiting 10 secs ...")
+                    time.sleep(10)  # Wait 10 seconds.
+                else:
+                    raise FileNotFoundError("nothing found after 10 tries. Aborting.")
+    logger.info(f"Found the following fastq_pass base which will be given to CoverMon: \n  {fastq_pass_base}\n")
 
 
     # base_dir is the place where fastq_pass, fast5_pass and the sequencing summary resides.
-    # TODO pathlib can do a lot of cleaning on these things;
-    base_dir = os.path.dirname(fastq_pass_base) # This only works because there is NOT a trailing slash on the fastq_pass_base
-    print(f"This is the batch base directory:\n  {base_dir}")
+    base_dir = fastq_pass_base.parent
+    logger.info(f"This is the batch base directory:\n  {base_dir}")
 
     return base_dir, fastq_pass_base
 
 
-def create_workflow_table(samplesheet: pd.DataFrame, fastq_pass_dir: str) -> pd.DataFrame:
+def create_workflow_table(samplesheet: pd.DataFrame, fastq_pass_dir: pathlib.Path) -> pd.DataFrame:
     """Record locations of barcode directories for each barcode.
 
     Args:
@@ -282,17 +280,21 @@ def create_workflow_table(samplesheet: pd.DataFrame, fastq_pass_dir: str) -> pd.
     Raises:
         Exception   if the barcodes' format is invalid
     """
-    disk_barcodes_list  = sorted(glob.glob(fastq_pass_dir + "/barcode*")) # Find all fastq_pass/barcode* directories
+    disk_barcodes_list  = sorted(list(fastq_pass_dir.glob("barcode*"))) # Find all fastq_pass/barcode* directories
     disk_barcodes_df = pd.DataFrame({'barcode_path': disk_barcodes_list})
 
 
-    disk_barcodes_df = disk_barcodes_df.assign(barcode_basename = [i.split("/")[-1] for i in disk_barcodes_df["barcode_path"]])
+    disk_barcodes_df["barcode_basename"] = disk_barcodes_df["barcode_path"].apply(lambda barcode_path: barcode_path.name)
     if "RB" in samplesheet["barcode"][0]:
-        disk_barcodes_df = disk_barcodes_df.assign(barcode = ["RB" + i[-2:] for i in disk_barcodes_df["barcode_path"]])
+        disk_barcodes_df["barcode"] = (disk_barcodes_df["barcode_basename"]
+                                       .apply(lambda barcode: "RB" + barcode[-2:]))
     elif "NB" in samplesheet["barcode"][0]:
-        disk_barcodes_df = disk_barcodes_df.assign(barcode = ["NB" + i[-2:] for i in disk_barcodes_df["barcode_path"]])
+        disk_barcodes_df["barcode"] = (disk_barcodes_df["barcode_basename"]
+                                       .apply(lambda barcode: "NB" + barcode[-2:]))
     else:
         raise Exception(f"Barcodes in samplesheet are not acceptable")
+    # all path operations done, back to strings
+    disk_barcodes_df["barcode_path"] = disk_barcodes_df["barcode_path"].apply(lambda barcode_path: str(barcode_path))
 
     # ensure consistent column format
     sample_cols = samplesheet.columns.tolist()
