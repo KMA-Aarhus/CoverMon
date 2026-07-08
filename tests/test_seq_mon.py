@@ -388,14 +388,17 @@ class TestValidateSamplesheet(unittest.TestCase):
         """Don't complain if everything looks good."""
         pass # TODO: second pass, return a bool and log things
 
+class TestValidateRundir(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
 
-class TestValidateRundir(unittest.TestCase):  # TODO: combine with find_fastq_pass_parent on a second pass
     def test_fail_missing_dir(self):
         """Raise an exception if the run directory doesn't exist."""
         test_dir = pathlib.Path(__file__).parent / "data" / "rundir" / "no_such_dir"
         error_msg = "The rundir does not exist."
-        with pytest.raises(Exception, match=re.escape(error_msg)):
-            seq_mon.validate_rundir(str(test_dir))
+        with pytest.raises(FileNotFoundError, match=re.escape(error_msg)):
+            seq_mon.validate_rundir(test_dir)
 
     def test_fail_timeout(self):
         """Raise an exception if nothing is found after a timeout."""
@@ -409,15 +412,24 @@ class TestValidateRundir(unittest.TestCase):  # TODO: combine with find_fastq_pa
                      " These paths were found:\n"
                      f" {str('\n ').join(fastq_pass_dirs)}\n"
                      "Please specify a more specific rundir.")
-        with pytest.raises(Exception, match=re.escape(error_msg)):
-            seq_mon.validate_rundir(str(test_dir))
+        with pytest.raises(ValueError, match=re.escape(error_msg)):
+            seq_mon.validate_rundir(test_dir)
 
     def test_success(self):
         """Find base directory and the fastq_pass directory it contains."""
         test_dir = pathlib.Path(__file__).parent / "data" / "rundir" / "test1"
-        expected_base = str(test_dir)
-        expected_fastq = str(test_dir / "fastq_pass")
-        test_base, test_fastq = seq_mon.validate_rundir(str(test_dir))
+        expected_base = test_dir
+        expected_fastq = test_dir / "fastq_pass"
+        info_msgs = ["Checking that the rundir exists ...                    ",
+                     "Looking for MinKNOW-characteristic output:",
+                         "  Looking ... ",
+                         f"Found                                    ✓",
+                         f"Found the following fastq_pass base which will be given to CoverMon: \n  {expected_fastq}\n",
+                         f"This is the batch base directory:\n  {expected_base}"]
+        with self._caplog.at_level(logging.INFO, logger = "seq_mon"):
+            test_base, test_fastq = seq_mon.validate_rundir(test_dir)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
         assert test_base == expected_base
         assert test_fastq == expected_fastq
 
@@ -438,7 +450,7 @@ class TestCreateWorkflowTable(unittest.TestCase):
                                      })
         error_msg = "Barcodes in samplesheet are not acceptable"
         with pytest.raises(Exception, match=re.escape(error_msg)):
-            seq_mon.create_workflow_table(test_df, str(self.test_dir))
+            seq_mon.create_workflow_table(test_df, self.test_dir)
 
     # TODO handling of workflow tables that end up empty after removing barcodes without sample ID?
 
@@ -466,7 +478,7 @@ class TestCreateWorkflowTable(unittest.TestCase):
                                          "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
 
                                      })
-        test_result = seq_mon.create_workflow_table(test_df, str(self.test_dir))
+        test_result = seq_mon.create_workflow_table(test_df, self.test_dir)
         print(test_result.columns)
         pd.testing.assert_frame_equal(expected_df, test_result)
 
@@ -494,7 +506,7 @@ class TestCreateWorkflowTable(unittest.TestCase):
                                          "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
 
                                          })
-        test_result = seq_mon.create_workflow_table(test_df, str(self.test_dir))
+        test_result = seq_mon.create_workflow_table(test_df, self.test_dir)
         pd.testing.assert_frame_equal(expected_df, test_result)
 
 
@@ -522,7 +534,7 @@ class TestCreateWorkflowTable(unittest.TestCase):
                                                           str(self.test_dir / "barcode04")],
                                          "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
                                          })
-        test_result = seq_mon.create_workflow_table(test_df, str(self.test_dir))
+        test_result = seq_mon.create_workflow_table(test_df, self.test_dir)
         pd.testing.assert_frame_equal(expected_df, test_result)
 
 
