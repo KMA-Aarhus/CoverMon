@@ -1,6 +1,7 @@
 import logging
 import pathlib
 import re
+import shutil
 import unittest
 
 from collections import namedtuple
@@ -15,12 +16,12 @@ import seq_mon
 class TestCoverReport(unittest.TestCase):
     test_dir = pathlib.Path(__file__).parent / "data" / "workflow_table" / "rundir" / "test_dir" / "fastq_pass"
     test_df = pd.DataFrame(data={"sample_id": ["test1", "test2", "test3", "test4"],
-                                         "barcode": ["RB01", "RB02", "RB03", "RB04"],
+                                         "barcode": ["NB01", "NB02", "NB03", "NB04"],
                                          "reference": ["nCoV-2019.reference.fa", "nCoV-2019.reference.fa",
                                                        "nCoV-2019.reference.fa", "nCoV-2019.reference.fa"],
-                                         "ct": ["10", "20", "30", np.nan],
+                                         "ct": [10, 20, 30, np.nan],
                                          "other_columns1": ["A", "B", "C", "D"],
-                                         "other_columns2": ["1", "2", "3", "4"],
+                                         "other_columns2": [1, 2, 3, 4],
                                          "barcode_path": [str(test_dir / "barcode01"),
                                                           str(test_dir / "barcode02"),
                                                           str(test_dir / "barcode03"),
@@ -31,26 +32,60 @@ class TestCoverReport(unittest.TestCase):
     test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir")
     test_samplesheet = str(pathlib.Path(__file__).parent / "data"/"samplesheet.xls")
 
+    # TODO check table generation
+
     def test_sense_check_thresholds(self):
         """Fail if maximum coverage reported is below minimum coverage."""
         error_msg = "Highest reported coverage must exceed minimum required coverage."
         with pytest.raises(ValueError, match = re.escape(error_msg)):
-            seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=100,
-                                maxDepth=10, reference=self.test_ref, out_base=self.test_outdir)
+            seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=100, maxDepth=10,
+                                reference=self.test_ref, out_base=self.test_outdir)
 
     def test_fail_region_for_refdir(self):
         """Don't allow using region files if reference is a directory (-> multiple ref sequences possible)"""
         error_msg = "Cannot supply a region file when different references per sample are used (base ref is a directory)"
         test_region = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_region.bed")
         with pytest.raises(ValueError, match=re.escape(error_msg)):
-            seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
-                                maxDepth=100, reference=self.test_ref, out_base=self.test_outdir, region_file=test_region)
+            seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
+                                reference=self.test_ref, out_base=self.test_outdir, region_file=test_region)
 
     def test_initialize_report(self):
         """Initialize a CoverReport."""
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=self.test_ref)
+        pd.testing.assert_frame_equal(test_report.workflow_table, self.test_df, check_dtype = False)
+        assert 10 == test_report.threshold
+        assert 100 == test_report.maxDepth
+        assert self.test_dir.parent / "CoverMon" == test_report.out_base
+        assert pathlib.Path(self.test_ref) == test_report.reference
+        assert len(test_report.processed_files) == 0
+        assert not test_report.is_open
+        assert self.test_samplesheet == test_report.sample_sheet
+
+        test_one_ref = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+                                           maxDepth=100, reference=str(pathlib.Path(self.test_ref) / "test_ref.fa"))
+        assert self.test_dir.parent / "CoverMon_test_ref" == test_one_ref.out_base
+
+    def test_find_fastq(self):
+        """Initialize a CoverReport and find the fastq_pass directory."""
+        test_dir = pathlib.Path(__file__).parent / "data" / "workflow_table" / "rundir"
+        test_report = seq_mon.CoverReport(str(test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=self.test_ref)
+        pd.testing.assert_frame_equal(test_report.workflow_table, self.test_df, check_dtype = False)
+        assert 10 == test_report.threshold
+        assert 100 == test_report.maxDepth
+        assert pathlib.Path(self.test_ref) == test_report.reference
+        assert len(test_report.processed_files) == 0
+        assert not test_report.is_open
+        assert self.test_samplesheet == test_report.sample_sheet
+        assert (test_dir / "test_dir" / "CoverMon") == test_report.out_base
+
+
+    def test_set_outdir(self):
+        """Initialize a CoverReport and set the output directory."""
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
-        pd.testing.assert_frame_equal(test_report.workflow_table, self.test_df)
+        pd.testing.assert_frame_equal(test_report.workflow_table, self.test_df, check_dtype = False)
         assert 10 == test_report.threshold
         assert 100 == test_report.maxDepth
         assert pathlib.Path(self.test_outdir) == test_report.out_base
@@ -59,15 +94,16 @@ class TestCoverReport(unittest.TestCase):
         assert not test_report.is_open
         assert self.test_samplesheet == test_report.sample_sheet
 
+
     def test_initialize_single_ref(self):
         """Initialize a CoverReport."""
         test_df = pd.DataFrame(data={"sample_id": ["test1", "test2", "test3", "test4"],
-                                     "barcode": ["RB01", "RB02", "RB03", "RB04"],
+                                     "barcode": ["NB01", "NB02", "NB03", "NB04"],
                                      "reference": ["nCoV-2019.reference.fa", "nCoV-2019.reference.fa",
                                                    "nCoV-2019.reference.fa", "nCoV-2019.reference.fa"],
-                                     "ct": ["10", "20", "30", np.nan],
-                                     "other_columns1": ["A", "B", "C", "D"],
-                                     "other_columns2": ["1", "2", "3", "4"],
+                                     "ct": [10, 20, 30, np.nan],
+                                         "other_columns1": ["A", "B", "C", "D"],
+                                         "other_columns2": [1, 2, 3, 4],
                                      "barcode_path": [str(self.test_dir / "barcode01"),
                                                       str(self.test_dir / "barcode02"),
                                                       str(self.test_dir / "barcode03"),
@@ -76,12 +112,13 @@ class TestCoverReport(unittest.TestCase):
                                      })
         test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa")
         test_region = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_region.bed")
-        test_report = seq_mon.CoverReport(workflow_table=test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=test_ref, out_base=self.test_outdir,
                                           region_file=test_region)
-        pd.testing.assert_frame_equal(test_report.workflow_table, test_df)
+        pd.testing.assert_frame_equal(test_report.workflow_table, test_df, check_dtype = False)
         assert 10 == test_report.threshold
         assert 100 == test_report.maxDepth
+        assert pathlib.Path(self.test_dir) == test_report.fastq_dir
         assert pathlib.Path(self.test_outdir) == test_report.out_base
         assert pathlib.Path(test_ref) == test_report.reference
         assert len(test_report.processed_files) == 0
@@ -91,7 +128,7 @@ class TestCoverReport(unittest.TestCase):
 
     def test_set_report_open_status(self):
         """Set the CoverReport to open/closed."""
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         test_report.set_open_status(True)
         assert test_report.is_open
@@ -100,10 +137,10 @@ class TestCoverReport(unittest.TestCase):
 
     def test_update_processed_files(self):
         """Update the processed files."""
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
-        test_2 = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
-                                     maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
+        test_2 = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
+                                     reference=self.test_ref, out_base=self.test_outdir)
         assert len(test_report.processed_files) == 0
         assert len(test_2.processed_files) == 0
         test_report.add_processed_file("path/to/processed.fq")
@@ -111,13 +148,26 @@ class TestCoverReport(unittest.TestCase):
         assert test_report.processed_files[0] == "path/to/processed.fq"
         assert len(test_2.processed_files) == 0
 
+    def test_add_multi_files(self):
+        """Update the processed files with a list of files."""
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
+        test_2 = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
+                                     reference=self.test_ref, out_base=self.test_outdir)
+        assert len(test_report.processed_files) == 0
+        assert len(test_2.processed_files) == 0
+        to_add = ["path/to/processed.fq", "path/to/processed_2.fq"]
+        test_report.add_processed_files(to_add)
+        assert len(test_report.processed_files) == 2
+        assert test_report.processed_files == to_add
+        assert len(test_2.processed_files) == 0
 
     def test_equality(self):
         """Compare two CoverReports."""
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
-        test_2 = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
-                                     maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
+        test_2 = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
+                                     reference=self.test_ref, out_base=self.test_outdir)
         assert test_report == test_2
         test_2.set_open_status(True)
         assert test_report != test_2
@@ -128,7 +178,7 @@ class TestCoverReport(unittest.TestCase):
 
     def test_compare_class(self):
         """Compare a CoverReport with a different class."""
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         TupleReport = namedtuple("TupleReport",
                                  ["workflow_table", "threshold", "maxDepth", "reference", "out_base",
@@ -139,15 +189,17 @@ class TestCoverReport(unittest.TestCase):
 
     def test_repr(self):
         """Print the CoverReport."""
-        expected_str = (f"CoverReport(sample_sheet={self.test_samplesheet}, threshold=10, maxDepth=100,"
+        expected_str = (f"CoverReport(fastq_dir={str(self.test_dir)}, sample_sheet={self.test_samplesheet}, "
+                        "threshold=10, maxDepth=100,"
                         f" reference={self.test_ref}, region_file=None,"
                         f" out_base={self.test_outdir}, processed_files=[], is_open=False)\n"
                         f"Workflow table:\n{self.test_df.head().to_string()}")
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         test_str = test_report.__repr__()
         assert expected_str == test_str
-        expected_processed = (f"CoverReport(sample_sheet={self.test_samplesheet}, threshold=10, maxDepth=100,"
+        expected_processed = (f"CoverReport(fastq_dir={str(self.test_dir)}, sample_sheet={self.test_samplesheet}, "
+                              "threshold=10, maxDepth=100,"
                               f" reference={self.test_ref}, region_file=None,"
                               f" out_base={self.test_outdir}, "
                               "processed_files=['path/to/processed_1.fq', 'path/to/processed_2.fq'], is_open=False)\n"
@@ -158,11 +210,12 @@ class TestCoverReport(unittest.TestCase):
         assert expected_processed == test_processed
         test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa")
         test_region = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_region.bed")
-        expected_region = (f"CoverReport(sample_sheet={self.test_samplesheet}, threshold=10, maxDepth=100,"
-                        f" reference={test_ref}, region_file={test_region},"
+        expected_region = (f"CoverReport(fastq_dir={str(self.test_dir)}, sample_sheet={self.test_samplesheet},"
+                           " threshold=10, maxDepth=100,"
+                            f" reference={test_ref}, region_file={test_region},"
                         f" out_base={self.test_outdir}, processed_files=[], is_open=False)\n"
                         f"Workflow table:\n{self.test_df.head().to_string()}")
-        region_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet,threshold=10,
+        region_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                             maxDepth=100, reference=test_ref, out_base=self.test_outdir,
                                             region_file=test_region)
         region_str = region_report.__repr__()
@@ -564,6 +617,8 @@ class TestUpdatePlot(unittest.TestCase):
     def tearDown(self):
         to_clean = [self.test_outdir / "RB01.bam", self.test_outdir / "RB02.bam",
                     self.test_outdir / "RB01.depth", self.test_outdir / "RB02.depth"]
+        with open((self.test_outdir / "processed_files.txt"), "w", encoding = "utf-8") as f:
+            f.write("")
         for test_file in to_clean:
             if test_file.exists():
                 test_file.unlink()
@@ -578,7 +633,7 @@ class TestUpdatePlot(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_success_already_opened(self, mock_create_bam, mock_run):
         """Successfully update the plot when the browser is already open"""
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=str(self.test_outdir))
         test_report.set_open_status(True)
         assert test_report.is_open
@@ -594,7 +649,8 @@ class TestUpdatePlot(unittest.TestCase):
         plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
                              "params = list(threshold = ", "10",
                              ", maxDepth= ", "100", ", path = ",
-                             "\'" + str(self.test_outdir) + "\', samplesheet = ", "\'" + self.test_samplesheet + "\', region_file = ",
+                             "\'" + str(self.test_outdir) + "\', samplesheet = ",
+                    "\'" + self.test_samplesheet + "\', region_file = ",
                              "\'" + "" + "\'))\""]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
@@ -612,6 +668,9 @@ class TestUpdatePlot(unittest.TestCase):
                               self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
                               self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
+        with open((self.test_outdir / "processed_files.txt"), "r", encoding = "utf-8") as f:
+            processed_from_file = f.read().splitlines()
+        assert sorted([str(processed) for processed in expected_processed]) == sorted(processed_from_file)
         mock_run.assert_has_calls([plot_call])
 
 
@@ -619,7 +678,7 @@ class TestUpdatePlot(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_success_open_window(self, mock_create_bam, mock_run):
         """Successfully update the plot when the browser is not yet open; update report status"""
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=str(self.test_outdir))
         assert not test_report.is_open
         mock_subprocess = mock.Mock()
@@ -662,10 +721,10 @@ class TestUpdatePlot(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_success_single_ref(self, mock_create_bam, mock_run):
         """Update the plot when we're using a single reference and a region file"""
-        test_report = seq_mon.CoverReport(workflow_table=self.test_df, sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=f"{self.test_ref}/test_ref.fa",
-                                          region_file=f"{self.test_ref}/test_region.bed",
-                                          out_base=str(self.test_outdir))
+                                          out_base=str(self.test_outdir),
+                                          region_file=f"{self.test_ref}/test_region.bed")
         assert not test_report.is_open
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
@@ -699,3 +758,244 @@ class TestUpdatePlot(unittest.TestCase):
                               self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
         mock_run.assert_has_calls([plot_call])
+
+class TestStartCovermon(unittest.TestCase):
+    test_indir = pathlib.Path(__file__).parent / "data"  / "workflow_table" / "rundir"
+    test_default_out = test_indir / "test_dir" / "CoverMon_test_ref"
+    test_default_ref_is_dir = test_indir / "test_dir" / "CoverMon"
+    test_outdir = pathlib.Path(__file__).parent / "data" / "out_dir"
+    test_out_existing = pathlib.Path(__file__).parent / "data" / "out_dir_2"
+    test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir")
+    test_samplesheet = str(pathlib.Path(__file__).parent / "data" / "samplesheet.xls")
+
+    def tearDown(self):
+        to_clean = [self.test_outdir / "RB01.bam", self.test_outdir / "RB02.bam",
+                    self.test_outdir / "RB01.depth", self.test_outdir / "RB02.depth",
+                    self.test_outdir / "sample_sheet_given.tsv",
+                    self.test_default_out / "RB01.bam", self.test_default_out / "RB02.bam",
+                    self.test_default_out / "RB01.depth", self.test_default_out / "RB02.depth",
+                    self.test_default_out / "sample_sheet_given.tsv", self.test_default_out / "processed_files.txt",
+                    self.test_default_ref_is_dir / "RB01.bam", self.test_default_ref_is_dir / "RB02.bam",
+                    self.test_default_ref_is_dir / "RB01.depth", self.test_default_ref_is_dir / "RB02.depth",
+                    self.test_default_ref_is_dir / "sample_sheet_given.tsv",
+                    self.test_default_ref_is_dir / "processed_files.txt",
+                    self.test_out_existing / "RB02.bam", self.test_out_existing / "RB02.depth",
+                    self.test_out_existing / "sample_sheet_given.tsv"]
+        for test_file in to_clean:
+            if test_file.exists():
+                test_file.unlink()
+        with open((self.test_outdir / "processed_files.txt"), "w", encoding="utf-8") as f:
+            f.write("")
+        with open(self.test_out_existing / "processed_files.txt", "w", encoding="utf-8") as f:
+            f.write("data/workflow_table/rundir/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz")
+        dirs_to_clean = [self.test_default_out, self.test_default_ref_is_dir]
+        for dir_to_clean in dirs_to_clean:
+            if dir_to_clean.exists():
+                shutil.rmtree(dir_to_clean)
+
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
+
+    # TODO waiting/timeout tests
+
+
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    @mock.patch(f"{seq_mon.__name__}.create_bam")
+    def test_default_one_ref(self, mock_create_bam, mock_run):
+        """Output to the default output directory when using a single reference."""
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        mock_create_bam.side_effect = bam_creator
+        cover_threshold = "100"
+        max_depth = "1000"
+        info_msgs = ["Backing up the original sample sheet...",
+                    "These are the parameters given:", f"This is the samplesheet: {self.test_samplesheet}",
+                     f"This is the run directory: {self.test_indir}",
+                     f"This is the reference: {self.test_ref}/test_ref.fa",
+                     f"This is the threshold: {cover_threshold}", f"This is the maxDepth in plot: {max_depth}",
+                     f"Creating output directory {self.test_default_out}...",
+                     "  The sequencing summary has been found. Run complete    ✓"]
+        initializing_msg = "Initializing report as closed"
+        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
+                    "params = list(threshold = ", str(cover_threshold),
+                    ", maxDepth= ", str(max_depth), ", path = ",
+                    "\'" + str(self.test_default_out) + "\', samplesheet = ",
+                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + "" + "\'))\""]
+        plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
+        browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_default_out}\" "
+                        "--host 127.0.0.1 --port 9000 --index \"plot_cov.html\"")
+        sync_call = mock.call(browser_sync, shell=True, check=True)
+        start_args = [self.test_samplesheet, str(self.test_indir), f"{self.test_ref}/test_ref.fa", cover_threshold,
+                      max_depth]
+        assert not self.test_default_out.exists()
+        with self._caplog.at_level(logging.DEBUG, logger = "seq_mon"):
+            seq_mon.start_covermon(start_args)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
+        assert self.test_default_out.exists()
+        assert (self.test_default_out / "sample_sheet_given.tsv").exists()
+        mock_run.assert_has_calls([plot_call, sync_call], any_order = True)
+
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    @mock.patch(f"{seq_mon.__name__}.create_bam")
+    def test_default_refdir(self, mock_create_bam, mock_run):
+        """Output to the default output directory when using a reference directory."""
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        mock_create_bam.side_effect = bam_creator
+        cover_threshold = "100"
+        max_depth = "1000"
+        info_msgs = ["Backing up the original sample sheet...",
+                     "These are the parameters given:", f"This is the samplesheet: {self.test_samplesheet}",
+                     f"This is the run directory: {self.test_indir}",
+                     f"This is the reference directory: {self.test_ref}",
+                     f"This is the threshold: {cover_threshold}", f"This is the maxDepth in plot: {max_depth}",
+                     f"Creating output directory {self.test_default_ref_is_dir}...",
+                     "  The sequencing summary has been found. Run complete    ✓"]
+        initializing_msg = "Initializing report as closed"
+        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
+                    "params = list(threshold = ", str(cover_threshold),
+                    ", maxDepth= ", str(max_depth), ", path = ",
+                    "\'" + str(self.test_default_ref_is_dir) + "\', samplesheet = ",
+                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + "" + "\'))\""]
+        plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
+        browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_default_ref_is_dir}\" "
+                        "--host 127.0.0.1 --port 9000 --index \"plot_cov.html\"")
+        sync_call = mock.call(browser_sync, shell=True, check=True)
+        start_args = [self.test_samplesheet, str(self.test_indir), self.test_ref, cover_threshold,
+                      max_depth]
+        assert not self.test_default_ref_is_dir.exists()
+        with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
+            seq_mon.start_covermon(start_args)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
+        assert self.test_default_ref_is_dir.exists()
+        assert (self.test_default_ref_is_dir / "sample_sheet_given.tsv").exists()
+        mock_run.assert_has_calls([plot_call, sync_call], any_order = True)
+
+
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    @mock.patch(f"{seq_mon.__name__}.create_bam")
+    def test_custom_output(self, mock_create_bam, mock_run):
+        """Output to a user-specified output directory."""
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        mock_create_bam.side_effect = bam_creator
+        cover_threshold = "100"
+        max_depth = "1000"
+        info_msgs = ["Backing up the original sample sheet...",
+                     "These are the parameters given:", f"This is the samplesheet: {self.test_samplesheet}",
+                     f"This is the run directory: {self.test_indir}",
+                     f"This is the reference directory: {self.test_ref}",
+                     f"This is the threshold: {cover_threshold}", f"This is the maxDepth in plot: {max_depth}",
+                     f"Creating output directory {self.test_outdir}...",
+                     "  The sequencing summary has been found. Run complete    ✓"]
+        initializing_msg = "Initializing report as closed"
+        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
+                    "params = list(threshold = ", str(cover_threshold),
+                    ", maxDepth= ", str(max_depth), ", path = ",
+                    "\'" + str(self.test_outdir) + "\', samplesheet = ",
+                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + "" + "\'))\""]
+        plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
+        browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_outdir}\" "
+                        "--host 127.0.0.1 --port 9000 --index \"plot_cov.html\"")
+        sync_call = mock.call(browser_sync, shell=True, check=True)
+        start_args = [self.test_samplesheet, str(self.test_indir), self.test_ref, cover_threshold,
+                      max_depth, "--outdir", str(self.test_outdir)]
+        with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
+            seq_mon.start_covermon(start_args)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
+        assert self.test_outdir.exists()
+        assert (self.test_outdir / "sample_sheet_given.tsv").exists()
+        mock_run.assert_has_calls([plot_call, sync_call], any_order = True)
+
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    @mock.patch(f"{seq_mon.__name__}.create_bam")
+    def test_region_file(self, mock_create_bam, mock_run):
+        """Use a region file."""
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        mock_create_bam.side_effect = bam_creator
+        cover_threshold = "100"
+        max_depth = "1000"
+        info_msgs = ["Backing up the original sample sheet...",
+                     f"This is the region file: {self.test_ref}/test_region.bed",
+                     "These are the parameters given:", f"This is the samplesheet: {self.test_samplesheet}",
+                     f"This is the run directory: {self.test_indir}",
+                     f"This is the reference: {self.test_ref}/test_ref.fa",
+                     f"This is the threshold: {cover_threshold}", f"This is the maxDepth in plot: {max_depth}",
+                     f"Creating output directory {self.test_outdir}...",
+                     "  The sequencing summary has been found. Run complete    ✓"]
+        initializing_msg = "Initializing report as closed"
+        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
+                    "params = list(threshold = ", str(cover_threshold),
+                    ", maxDepth= ", str(max_depth), ", path = ",
+                    "\'" + str(self.test_outdir) + "\', samplesheet = ",
+                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + f"{self.test_ref}/test_region.bed" + "\'))\""]
+        plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
+        browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_outdir}\" "
+                        "--host 127.0.0.1 --port 9000 --index \"plot_cov.html\"")
+        sync_call = mock.call(browser_sync, shell=True, check=True)
+        start_args = [self.test_samplesheet, str(self.test_indir), f"{self.test_ref}/test_ref.fa", cover_threshold,
+                      max_depth, "--outdir", str(self.test_outdir), "--region_file", f"{self.test_ref}/test_region.bed"]
+        with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
+            seq_mon.start_covermon(start_args)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
+        assert self.test_outdir.exists()
+        assert (self.test_outdir / "sample_sheet_given.tsv").exists()
+        mock_run.assert_has_calls([plot_call, sync_call], any_order = True)
+
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    @mock.patch(f"{seq_mon.__name__}.create_bam")
+    def test_existing_processed(self, mock_create_bam, mock_run):
+        """Output to a directory already containing processed files."""
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        mock_create_bam.side_effect = bam_creator
+        cover_threshold = "100"
+        max_depth = "1000"
+        info_msgs = ["Backing up the original sample sheet...",
+                     "These are the parameters given:", f"This is the samplesheet: {self.test_samplesheet}",
+                     f"This is the run directory: {self.test_indir}",
+                     f"This is the reference directory: {self.test_ref}",
+                     f"This is the threshold: {cover_threshold}", f"This is the maxDepth in plot: {max_depth}",
+                     f"Creating output directory {self.test_out_existing}...",
+                     "I have found processed files, opening existing report",
+                     "  The sequencing summary has been found. Run complete    ✓"]
+        initializing_msg = "Initializing report as closed"
+        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
+                    "params = list(threshold = ", str(cover_threshold),
+                    ", maxDepth= ", str(max_depth), ", path = ",
+                    "\'" + str(self.test_out_existing) + "\', samplesheet = ",
+                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + "" + "\'))\""]
+        plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
+        browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_out_existing}\" "
+                        "--host 127.0.0.1 --port 9000 --index \"plot_cov.html\"")
+        sync_call = mock.call(browser_sync, shell=True, check=True)
+        start_args = [self.test_samplesheet, str(self.test_indir), self.test_ref, cover_threshold,
+                      max_depth, "--outdir", str(self.test_out_existing)]
+        with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
+            seq_mon.start_covermon(start_args)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
+        assert self.test_out_existing.exists()
+        assert (self.test_out_existing / "sample_sheet_given.tsv").exists()
+        mock_run.assert_has_calls([plot_call, sync_call], any_order = True)

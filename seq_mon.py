@@ -1,19 +1,16 @@
 __author__ = "Tine Sneibjerg Ebsen, Kat Steinke"
 __version__ = "0.3"
 
+import argparse
 import glob
 import logging
-import os
 import pathlib
 import subprocess
 import sys
 import time
 
-from argparse import ArgumentParser
-from os import listdir
 from os.path import isfile, isdir, join, exists
-from typing import Optional
-
+from typing import Optional, List
 
 import pandas as pd
 import numpy as np
@@ -29,6 +26,7 @@ class CoverReport:
     """A coverage report generated on the base of input data and parameters, written to an output directory,
     with tracking of open/close status and processed input files.
     Attributes:
+        fastq_dir:          the directory containing sequencing data
         workflow_table:     mapping of fastq_pass dirs to barcodes
         sample_sheet:       path to sample sheet
         threshold:          minimum coverage required
@@ -40,18 +38,18 @@ class CoverReport:
         region_file:        path to bed file with regions in the reference
                             (optional, only allowed if reference is a single file)
     """
-    def __init__(self, workflow_table: pd.DataFrame, sample_sheet: str, threshold: int, maxDepth: int, reference: str,
-                 out_base: str, region_file: Optional[str] = None) \
+    def __init__(self, indir: str, sample_sheet: str, threshold: int, maxDepth: int, reference: str,
+                 out_base: Optional[str] = None, region_file: Optional[str] = None) \
             -> None:
         """Initialize a CoverReport object.
 
         Args:
-            workflow_table: mapping of fastq_pass dirs to barcodes
+            indir:          the directory containing sequencing data
             sample_sheet:   path to sample sheet
             threshold:      minimum coverage required
             maxDepth:       maximum coverage reported
             reference:      reference file or directory
-            out_base:       output base directory
+            out_base:       output base directory (optional)
             region_file:    path to bed file with regions in the reference
                             (optional, only allowed if reference is a single file)
 
@@ -66,19 +64,30 @@ class CoverReport:
         if pathlib.Path(reference).is_dir() and region_file is not None:
             raise ValueError("Cannot supply a region file when different references per sample are used "
                              "(base ref is a directory)")
-        self.workflow_table = workflow_table
+        dummy, self.fastq_dir = validate_rundir(pathlib.Path(indir))
+        self.reference = pathlib.Path(reference)  # TODO: rework to take a Path to begin with?
         self.sample_sheet = sample_sheet
+        # sample sheet validation happens here
+        df = parse_samplesheet(self.sample_sheet)
+        validate_samplesheet(df, self.reference.is_file())
+        self.workflow_table = create_workflow_table(df, self.fastq_dir)
         self.threshold = threshold
         self.maxDepth = maxDepth
-        self.reference = pathlib.Path(reference)  # TODO: rework to take a Path to begin with?
-        self.out_base = pathlib.Path(out_base)
+        if out_base is not None:
+            self.out_base = pathlib.Path(out_base)
+        else:
+            covermon_dirname = "CoverMon"
+            if self.reference.is_file():
+                covermon_dirname = f"{covermon_dirname}_{self.reference.stem}"
+            self.out_base = self.fastq_dir.parent / covermon_dirname
         self.is_open = False  # TODO: can we assume this?
         self.processed_files = []
         self.region_file = region_file
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, CoverReport):
-            return ((self.sample_sheet == other.sample_sheet
+            return ((self.fastq_dir == other.fastq_dir
+                     and self.sample_sheet == other.sample_sheet
                      and self.threshold == other.threshold
                      and self.maxDepth == other.maxDepth
                      and self.reference == other.reference
@@ -90,7 +99,8 @@ class CoverReport:
         return False
 
     def __repr__(self):
-        return(f"CoverReport(sample_sheet={self.sample_sheet}, threshold={self.threshold}, maxDepth={self.maxDepth},"
+        return(f"CoverReport(fastq_dir={self.fastq_dir}, sample_sheet={self.sample_sheet}, "
+               f"threshold={self.threshold}, maxDepth={self.maxDepth},"
                f" reference={self.reference}, region_file={self.region_file},"
                f" out_base={self.out_base}, processed_files={self.processed_files},"
                f" is_open={self.is_open})\n"
@@ -104,7 +114,7 @@ class CoverReport:
         """
         self.is_open = open_status
 
-    # TODO: move to paths in second pass
+    # TODO: move to paths in second pass - also do we need the single add?
     def add_processed_file(self, processed: str) -> None:
         """Add a file to the record of processed files.
 
@@ -114,7 +124,13 @@ class CoverReport:
         """
         self.processed_files.append(processed)
 
-    # TODO bulk add processed files from file
+    def add_processed_files(self, processed_files: List[str]) -> None:
+        """Add a number of files to the record of processed files.
+
+        Args:
+            processed_files:    the processed files to add
+        """
+        self.processed_files.extend(processed_files)
 
 
 
@@ -393,24 +409,7 @@ def get_depth(bam: pathlib.Path, depth_out: pathlib.Path) -> None:
     logger.debug(plot_cov_cmd2)
     subprocess.run(plot_cov_cmd2.split(), check = True)
 
-
-# TODO: ALL OF THE VARS here, let's feed this an object specifying report params
-# We need:
-# already specified as args:
-# - workflow_table - mapping of fastq pass dirs to barcodes, could be attached to the report instead
-# - reference - reference file/dir if given (attach to report, build the per-line ref path?)
-# - samplesheet: path to sample sheet
-# - open_report: whether the report is open or not - could attach that to the CoverReport?
-
-# used to be in the main function
-# - out_base: the output base dir (attach to report?)
-# - one_ref: whether the ref is a file or a dir - maybe just go off the CoverReport's reference, if that is_dir or not
-# - refdir: replace with CoverReport.reference
-# - processed_files: attach to CoverReport?
-# - threshold: attach to CoverReport - take from config in the future?
-# - maxDepth: attach to CoverReport - take from config in the future?
-# - region_file: attach to CoverReport
-def update_plot(active_report: CoverReport):
+def update_plot(active_report: CoverReport) -> None:
     """Create or update the coverage plot for a given report and show plot in a browser window
 
     Args:
@@ -475,106 +474,76 @@ def update_plot(active_report: CoverReport):
                     shell=True,
                 check = True)
                 active_report.set_open_status(True)
-    #return open_report # TODO we don't need this anymore
 
-def start_covermon():
-    tab = "\t"
-    nl = "\n"
+def start_covermon(start_args) -> None:
+    """Start monitoring with the supplied arguments
+
+    Args:
+        start_args: the arguments supplied by the user
 
 
+    """
     #####################
     # Start the monitor #
     #####################
-
     # Parse and check arguments
-    if len(sys.argv) < 4:
-        raise Exception(f"Missing arguments. The script must contain (1) samplesheet, (2) path to run directory, (3) path to reference or reference directory, (4) threshold for minimum coverage, (5) maximum depth displayed in plot. Optionally, a region file (6) can be specified if all samples use the same reference genome.")
+    parser = argparse.ArgumentParser(description="Start CoverMon")
+    parser.add_argument("samplesheet", help = "Path to sample sheet for run")
+    parser.add_argument("rundir", help = "Path to the directory containing sequencing data")
+    parser.add_argument("reference",
+                        help = "Path to the reference fasta file or directory with reference files to use")
+    parser.add_argument("threshold", help = "Minimum coverage to pass QC")
+    parser.add_argument("maxdepth", help = "Maximum depth to plot")
+    parser.add_argument("--region_file",
+                        help = "Path to the region file to be used (optional, only for a single reference file)",
+                        default = None)
+    parser.add_argument("--outdir",
+                        help = "Path to the output directory (default: [rundir]/CoverMon if reference is a dir,"
+                               "[rundir]/CoverMon_[ref_filename] otherwise)", default = None)
+    args = parser.parse_args(start_args)
+    rundir = pathlib.Path(args.rundir)
+    # initialize the report
+    # Set an open_report state to stop opening multiple reports
+    logger.debug("Initializing report as closed")
+    report = CoverReport(rundir, args.samplesheet, args.threshold, args.maxdepth, args.reference, args.outdir,
+                         args.region_file)
 
-    samplesheet = sys.argv[1]
-    rundir = sys.argv[2]
-    threshold = sys.argv[4]
-    maxDepth = sys.argv[5]
-
-    if ".fa" in sys.argv[3]:
-        reference = sys.argv[3]
-        one_ref = True
-        if len(sys.argv) == 7:
-            region_file = sys.argv[6]
-            print("This is the region file:", sys.argv[6])
-        else: 
-            region_file = "NA"
-    else:
-        refdir = sys.argv[3]
-        one_ref = False
-        region_file = "NA"
-
-    print(f"These are the parameters given:")
-    print("This is the samplesheet: ", samplesheet)
-    print("This is the run directory: ", rundir)
-    if one_ref == True:
-        print("This is the reference:", reference)
-    else:
-        print("This is the reference directory:", refdir)
-    print("This is the threshold: ", threshold)
-    print("This is the maxDepth in plot:", maxDepth)
-
-    #########################
-    # Parse the samplesheet #
-    #########################
-
-    df = parse_samplesheet(samplesheet)
-
-    validate_samplesheet(df, one_ref)
-
-
-    ###################
-    # Validate rundir #
-    ###################
-
-    base_dir, fastq_pass_base = validate_rundir(rundir)
+    if report.region_file is not None:
+        logger.info(f"This is the region file: {report.region_file}")
+    logger.info("These are the parameters given:")
+    logger.info(f"This is the samplesheet: {report.sample_sheet}")
+    logger.info(f"This is the run directory: {rundir}")
+    logger.info(f"This is the reference{' directory' if report.reference.is_dir() else ''}: {report.reference}")
+    logger.info(f"This is the threshold: {report.threshold}")
+    logger.info(f"This is the maxDepth in plot: {report.maxDepth}")
 
     ###########################
     # Create output directory #
     ###########################
-    if one_ref == True:
-        out_base = os.path.join(base_dir, "CoverMon_"+reference.split("/")[-1].split(".")[0])
-    else:
-        out_base = os.path.join(base_dir, "CoverMon") # out_base is the directory where the pipeline will write its output to.
-    print("Creating output directory ", out_base,"...")
-    print("Creating output directory ", out_base,"...")
-    subprocess.run(["mkdir","-p", out_base])
-    print()
+    logger.info(f"Creating output directory {report.out_base}...")
+    report.out_base.mkdir(parents=True, exist_ok=True)
 
-    sample_sheet_out = f"{out_base}/sample_sheet_given.tsv"
-    print(f"Backing up the original sample sheet ...               ", end = "", flush = True)
+    # back up sample sheet
+    df = parse_samplesheet(report.sample_sheet)  # TODO: doing this twice
+    sample_sheet_out = report.out_base / "sample_sheet_given.tsv"
+    logger.info("Backing up the original sample sheet...")
     df.to_csv(sample_sheet_out, sep = "\t", index=False, na_rep='NA')
-    print("✓")
-
-    #########################
-    # Create workflow table #
-    #########################
-
-    workflow_table = create_workflow_table(df, fastq_pass_base)
 
     ##################
     # Start CoverMon #
     ##################
-
-    # Set an open_report state to stop opening multiple reports
-    print("Setting open_report to false")
-    open_report = False
-
     # Keep track of processed files to avoid starting from scratch if script is terminated
-    if exists(f"{out_base}/processed_files.txt") and open_report == False:
-        print("I have found processed files, opening report")
-        processed_files_txt = open(f"{out_base}/processed_files.txt", mode ="r", newline=nl)
-        processed_files = processed_files_txt.read().splitlines()
-        processed_files_txt.close()
+    if (report.out_base / "processed_files.txt").exists() and not report.is_open:  # TODO: it'll always be closed?
+        # TODO: when we can run multiple scripts, make sure we're restarting with the same settings
+        logger.info("I have found processed files, opening existing report")
+        with open(report.out_base / "processed_files.txt", "r") as processed_files_txt:
+            processed_files = processed_files_txt.read().splitlines()
+            report.add_processed_files(processed_files)
         # Starts browser-sync in a new terminal. This will not work on windows or macOS.
-        subprocess.run("gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + out_base +"\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"", shell=True)                
-        open_report = True
-    else:
-        processed_files = []
+        browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{report.out_base}\" "
+                        "--host 127.0.0.1 --port 9000 --index \"plot_cov.html\"")
+        subprocess.run(browser_sync, shell = True, check = True)
+        report.set_open_status(True)
 
 
     # When sequencing, we will check for new files every 60 seconds
@@ -585,11 +554,11 @@ def start_covermon():
 
     while still_sequencing:
         # Scans for new files and updates the plot if any are found
-        open_report = update_plot(workflow_table, reference, sample_sheet_out,open_report)
+        update_plot(report)
 
         # Continue the monitor as long as the sequence summary does not exist. Wait <seconds_wait> between scans.
         # TODO: rework this so we can rerun/run in parallel
-        sequencing_summary_file = glob.glob(base_dir + "/sequencing_summary_*.txt")
+        sequencing_summary_file = list(report.fastq_dir.parent.glob("sequencing_summary_*.txt"))
         if len(sequencing_summary_file) == 0:
             print(f"  Still sequencing/basecalling; waiting {seconds_wait} seconds before next scan ...")
             time.sleep(seconds_wait)
@@ -597,9 +566,8 @@ def start_covermon():
             still_sequencing = False
 
 
-    sequencing_summary_file = sequencing_summary_file[0]
-    print("  The sequencing summary has been found. Run complete    ✓")
+    logger.info("  The sequencing summary has been found. Run complete    ✓")
 
 if __name__ == "__main__":
-    start_covermon()
+    start_covermon(sys.argv[1:])
 
