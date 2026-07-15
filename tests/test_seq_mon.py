@@ -28,9 +28,9 @@ class TestCoverReport(unittest.TestCase):
                                                           str(test_dir / "barcode04")],
                                          "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
                                          })
-    test_outdir = str(pathlib.Path(__file__).parent / "data" / "out_dir")
-    test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir")
-    test_samplesheet = str(pathlib.Path(__file__).parent / "data"/"samplesheet.xls")
+    test_outdir = pathlib.Path(__file__).parent / "data" / "out_dir"
+    test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir"
+    test_samplesheet = pathlib.Path(__file__).parent / "data"/"samplesheet.xls"
 
     # TODO check table generation
 
@@ -38,43 +38,43 @@ class TestCoverReport(unittest.TestCase):
         """Fail if maximum coverage reported is below minimum coverage."""
         error_msg = "Highest reported coverage must exceed minimum required coverage."
         with pytest.raises(ValueError, match = re.escape(error_msg)):
-            seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=100, maxDepth=10,
+            seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=100, maxDepth=10,
                                 reference=self.test_ref, out_base=self.test_outdir)
 
     def test_fail_region_for_refdir(self):
         """Don't allow using region files if reference is a directory (-> multiple ref sequences possible)"""
         error_msg = "Cannot supply a region file when different references per sample are used (base ref is a directory)"
-        test_region = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_region.bed")
+        test_region = pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_region.bed"
         with pytest.raises(ValueError, match=re.escape(error_msg)):
-            seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
+            seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
                                 reference=self.test_ref, out_base=self.test_outdir, region_file=test_region)
 
     def test_initialize_report(self):
         """Initialize a CoverReport."""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref)
         pd.testing.assert_frame_equal(test_report.workflow_table, self.test_df, check_dtype = False)
         assert 10 == test_report.threshold
         assert 100 == test_report.maxDepth
         assert self.test_dir.parent / "CoverMon" == test_report.out_base
-        assert pathlib.Path(self.test_ref) == test_report.reference
+        assert self.test_ref == test_report.reference
         assert len(test_report.processed_files) == 0
         assert not test_report.is_open
         assert self.test_samplesheet == test_report.sample_sheet
 
-        test_one_ref = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
-                                           maxDepth=100, reference=str(pathlib.Path(self.test_ref) / "test_ref.fa"))
+        test_one_ref = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
+                                           maxDepth=100, reference=pathlib.Path(self.test_ref) / "test_ref.fa")
         assert self.test_dir.parent / "CoverMon_test_ref" == test_one_ref.out_base
 
     def test_find_fastq(self):
         """Initialize a CoverReport and find the fastq_pass directory."""
         test_dir = pathlib.Path(__file__).parent / "data" / "workflow_table" / "rundir"
-        test_report = seq_mon.CoverReport(str(test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref)
         pd.testing.assert_frame_equal(test_report.workflow_table, self.test_df, check_dtype = False)
         assert 10 == test_report.threshold
         assert 100 == test_report.maxDepth
-        assert pathlib.Path(self.test_ref) == test_report.reference
+        assert self.test_ref == test_report.reference
         assert len(test_report.processed_files) == 0
         assert not test_report.is_open
         assert self.test_samplesheet == test_report.sample_sheet
@@ -83,20 +83,20 @@ class TestCoverReport(unittest.TestCase):
 
     def test_set_outdir(self):
         """Initialize a CoverReport and set the output directory."""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         pd.testing.assert_frame_equal(test_report.workflow_table, self.test_df, check_dtype = False)
         assert 10 == test_report.threshold
         assert 100 == test_report.maxDepth
-        assert pathlib.Path(self.test_outdir) == test_report.out_base
-        assert pathlib.Path(self.test_ref) == test_report.reference
+        assert self.test_outdir == test_report.out_base
+        assert self.test_ref == test_report.reference
         assert len(test_report.processed_files) == 0
         assert not test_report.is_open
         assert self.test_samplesheet == test_report.sample_sheet
 
 
     def test_initialize_single_ref(self):
-        """Initialize a CoverReport."""
+        """Initialize a CoverReport with a single reference file."""
         test_df = pd.DataFrame(data={"sample_id": ["test1", "test2", "test3", "test4"],
                                      "barcode": ["NB01", "NB02", "NB03", "NB04"],
                                      "reference": ["nCoV-2019.reference.fa", "nCoV-2019.reference.fa",
@@ -110,17 +110,17 @@ class TestCoverReport(unittest.TestCase):
                                                       str(self.test_dir / "barcode04")],
                                      "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
                                      })
-        test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa")
-        test_region = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_region.bed")
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa"
+        test_region = pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_region.bed"
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=test_ref, out_base=self.test_outdir,
                                           region_file=test_region)
         pd.testing.assert_frame_equal(test_report.workflow_table, test_df, check_dtype = False)
         assert 10 == test_report.threshold
         assert 100 == test_report.maxDepth
-        assert pathlib.Path(self.test_dir) == test_report.fastq_dir
-        assert pathlib.Path(self.test_outdir) == test_report.out_base
-        assert pathlib.Path(test_ref) == test_report.reference
+        assert self.test_dir == test_report.fastq_dir
+        assert self.test_outdir == test_report.out_base
+        assert test_ref == test_report.reference
         assert len(test_report.processed_files) == 0
         assert not test_report.is_open
         assert self.test_samplesheet == test_report.sample_sheet
@@ -128,7 +128,7 @@ class TestCoverReport(unittest.TestCase):
 
     def test_set_report_open_status(self):
         """Set the CoverReport to open/closed."""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         test_report.set_open_status(True)
         assert test_report.is_open
@@ -137,26 +137,26 @@ class TestCoverReport(unittest.TestCase):
 
     def test_update_processed_files(self):
         """Update the processed files."""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
-        test_2 = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
+        test_2 = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
                                      reference=self.test_ref, out_base=self.test_outdir)
         assert len(test_report.processed_files) == 0
         assert len(test_2.processed_files) == 0
-        test_report.add_processed_file("path/to/processed.fq")
+        test_report.add_processed_file(pathlib.Path("path/to/processed.fq"))
         assert len(test_report.processed_files) == 1
-        assert test_report.processed_files[0] == "path/to/processed.fq"
+        assert test_report.processed_files[0] == pathlib.Path("path/to/processed.fq")
         assert len(test_2.processed_files) == 0
 
     def test_add_multi_files(self):
         """Update the processed files with a list of files."""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
-        test_2 = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
+        test_2 = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
                                      reference=self.test_ref, out_base=self.test_outdir)
         assert len(test_report.processed_files) == 0
         assert len(test_2.processed_files) == 0
-        to_add = ["path/to/processed.fq", "path/to/processed_2.fq"]
+        to_add = [pathlib.Path("path/to/processed.fq"), pathlib.Path("path/to/processed_2.fq")]
         test_report.add_processed_files(to_add)
         assert len(test_report.processed_files) == 2
         assert test_report.processed_files == to_add
@@ -164,21 +164,21 @@ class TestCoverReport(unittest.TestCase):
 
     def test_equality(self):
         """Compare two CoverReports."""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
-        test_2 = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
+        test_2 = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
                                      reference=self.test_ref, out_base=self.test_outdir)
         assert test_report == test_2
         test_2.set_open_status(True)
         assert test_report != test_2
         test_2.set_open_status(False)
         assert test_report == test_2
-        test_report.add_processed_file("path/to/processed.fq")
+        test_report.add_processed_file(pathlib.Path("path/to/processed.fq"))
         assert test_report != test_2
 
     def test_compare_class(self):
         """Compare a CoverReport with a different class."""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         TupleReport = namedtuple("TupleReport",
                                  ["workflow_table", "threshold", "maxDepth", "reference", "out_base",
@@ -194,7 +194,7 @@ class TestCoverReport(unittest.TestCase):
                         f" reference={self.test_ref}, region_file=None,"
                         f" out_base={self.test_outdir}, processed_files=[], is_open=False)\n"
                         f"Workflow table:\n{self.test_df.head().to_string()}")
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         test_str = test_report.__repr__()
         assert expected_str == test_str
@@ -208,14 +208,14 @@ class TestCoverReport(unittest.TestCase):
         test_report.add_processed_file("path/to/processed_2.fq")
         test_processed = test_report.__repr__()
         assert expected_processed == test_processed
-        test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa")
-        test_region = str(pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_region.bed")
+        test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa"
+        test_region = (pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_region.bed")
         expected_region = (f"CoverReport(fastq_dir={str(self.test_dir)}, sample_sheet={self.test_samplesheet},"
                            " threshold=10, maxDepth=100,"
                             f" reference={test_ref}, region_file={test_region},"
                         f" out_base={self.test_outdir}, processed_files=[], is_open=False)\n"
                         f"Workflow table:\n{self.test_df.head().to_string()}")
-        region_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
+        region_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                             maxDepth=100, reference=test_ref, out_base=self.test_outdir,
                                             region_file=test_region)
         region_str = region_report.__repr__()
@@ -236,7 +236,7 @@ class TestCreateBam(unittest.TestCase):
         test_out_sam = str(out_base / "tmp.sam")
         test_out_bam = out_base / "barcode01.bam"
         test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa"
-        test_file = 'path/to/processed_1.fq'
+        test_file = pathlib.Path('path/to/processed_1.fq')
         # log the commands and the bit where we're creating a new file
         map_log = f"minimap2 -a -o {test_out_sam} {str(test_ref)} {test_file}"
         new_bam = "Creating initial bam"
@@ -267,7 +267,7 @@ class TestAppendBam(unittest.TestCase):
         test_out_bam = out_base / "barcode01.bam"
         test_out_sorted = str(out_base / "sorted.bam")
         test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa"
-        test_file = 'path/to/processed_1.fq'
+        test_file = pathlib.Path('path/to/processed_1.fq')
         map_log = f"minimap2 -a -o {test_out_sam} {str(test_ref)} {test_file}"
         bam_log = f"samtools sort -O bam -o {test_out_sorted} {test_out_sam}"
         merge_log = f"samtools merge -f -o {str(out_base / 'tmp.bam')} {test_out_sorted} {test_out_bam}"
@@ -327,7 +327,7 @@ class TestWriteToProcessed(unittest.TestCase):
         assert not content
         # write one string
         to_write = "teststring"
-        seq_mon.write_to_processed(to_write, str(self.outdir))
+        seq_mon.write_to_processed(to_write, self.outdir)
         # check we only have the one
         with open(self.outfile, "r", encoding = "utf-8") as f:
             content = f.readlines()
@@ -335,7 +335,7 @@ class TestWriteToProcessed(unittest.TestCase):
         assert content[0] == "teststring\n"
         # write another and check we've appended
         write_more = "test_2"
-        seq_mon.write_to_processed(write_more, str(self.outdir))
+        seq_mon.write_to_processed(write_more, self.outdir)
         with open(self.outfile, "r", encoding = "utf-8") as f:
             content = f.readlines()
         assert len(content) == 2
@@ -344,12 +344,17 @@ class TestWriteToProcessed(unittest.TestCase):
 
 
 class TestParseSamplesheet(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
+
+
     def test_fail_bad_format(self):
         """Raise an exception if the sample sheet isn't in a supported format"""
         test_sheet = pathlib.Path(__file__).parent / "data" / "samplesheet.csv"
         error_msg = "The spreadsheet must be excel formatted (.xlsx or .xls)"
-        with pytest.raises(Exception, match = re.escape(error_msg)):
-            seq_mon.parse_samplesheet(str(test_sheet))
+        with pytest.raises(ValueError, match = re.escape(error_msg)):
+            seq_mon.parse_samplesheet(test_sheet)
 
     def test_success_xls(self):
         """Read an xls file and process the contents."""
@@ -362,7 +367,16 @@ class TestParseSamplesheet(unittest.TestCase):
                                             "other_columns1": ["A", "B", "C", "D"],
                                             "other_columns2": [1, 2, 3, 4]
                                             })
-        test_result = seq_mon.parse_samplesheet(str(test_sheet))
+        reading_msg = f'Reading .xls-type sample sheet "{test_sheet}"'
+        cleaning_msg = "Cleaning sample sheet ...                              "
+        finished_msg = "Sample sheet cleaned ✓"
+        info_msgs = [reading_msg, cleaning_msg, finished_msg]
+
+        with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
+            test_result = seq_mon.parse_samplesheet(test_sheet)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, expected_sheet.to_string()) in self._caplog.record_tuples
         pd.testing.assert_frame_equal(expected_sheet, test_result)
 
     def test_success_xlsx(self):
@@ -377,12 +391,24 @@ class TestParseSamplesheet(unittest.TestCase):
                                               "other_columns2": ["1", "2", "3", "4"]
                                               })
         expected_sheet = expected_sheet.astype({"ct": "object"})
-        print(expected_sheet["ct"])
-        test_result = seq_mon.parse_samplesheet(str(test_sheet))
+        reading_msg = f'Reading .xlsx-type sample sheet "{test_sheet}"'
+        cleaning_msg = "Cleaning sample sheet ...                              "
+        finished_msg = "Sample sheet cleaned ✓"
+        info_msgs = [reading_msg, cleaning_msg, finished_msg]
+
+        with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
+            test_result = seq_mon.parse_samplesheet(test_sheet)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
+            assert ("seq_mon", logging.DEBUG, expected_sheet.to_string()) in self._caplog.record_tuples
         pd.testing.assert_frame_equal(expected_sheet, test_result, check_dtype = False)
 
 
 class TestValidateSamplesheet(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
+
     def test_fail_missing_column_refdir(self):
         """Raise an exception if the sample sheet is missing a required column when reference is given as a dir."""
         test_sheet = pd.DataFrame(data = {"sample_id": ["test1", "test2", "test3", "test4"],
@@ -392,15 +418,28 @@ class TestValidateSamplesheet(unittest.TestCase):
                                               "other_columns1": ["A", "B", "C", "D"],
                                               "other_columns2": ["1", "2", "3", "4"]
                                               })
+        info_msg = "Checking that the necessary columns exist ..."
         error_msg = ("The sample sheet is missing a necessary column. The sample sheet must contain the column barcode,"
                      f" but it only contains ['ct', 'other_columns1', 'other_columns2', 'reference', 'sample_id']")
-        with pytest.raises(Exception, match=re.escape(error_msg)):
+        with (pytest.raises(KeyError, match=re.escape(error_msg)),
+              self._caplog.at_level(logging.DEBUG, logger="seq_mon")):
             seq_mon.validate_samplesheet(test_sheet, ref_is_file = False)
+            assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
 
     def test_fail_missing_column(self):
         """Raise an exception if the sample sheet is missing a required column
         (and reference is not a required column)."""
-        pass  # TODO second pass when we start tweaking behavior
+        test_sheet = pd.DataFrame(data={"sample_id": ["test1", "test2", "test3", "test4"],
+                                        "ct": ["10", "20", "30", np.nan],
+                                        "other_columns1": ["A", "B", "C", "D"],
+                                        "other_columns2": ["1", "2", "3", "4"]
+                                        })
+        error_msg = ("The sample sheet is missing a necessary column. The sample sheet must contain the column barcode,"
+                     f" but it only contains ['ct', 'other_columns1', 'other_columns2', 'sample_id']")
+        info_msg = "Checking that the necessary columns exist ..."
+        with pytest.raises(KeyError, match=re.escape(error_msg)):
+            seq_mon.validate_samplesheet(test_sheet, ref_is_file = True)
+            assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
 
     def test_fail_bad_barcode(self):
         """Raise an exception if a barcode is malformed."""
@@ -417,8 +456,13 @@ class TestValidateSamplesheet(unittest.TestCase):
         error_msg = ("The given barcode LB02 is not an acceptable barcode. "
                      "Here is a list of acceptable barcodes for inspiration:\n"
                      f"{' '.join(acceptable_barcodes)}")
-        with pytest.raises(Exception, match=re.escape(error_msg)):
+        info_msgs = ["Checking that the necessary columns exist ...", "All necessary columns found ✓",
+                     "Checking that the barcodes are correctly formatted ..."]
+        with (pytest.raises(ValueError, match=re.escape(error_msg)),
+              self._caplog.at_level(logging.DEBUG, logger="seq_mon")):
             seq_mon.validate_samplesheet(test_sheet, ref_is_file = True)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
 
     def test_fail_duplicated_barcode(self):
         """Raise an exception if a barcode is duplicated."""
@@ -434,12 +478,35 @@ class TestValidateSamplesheet(unittest.TestCase):
                                   index = pd.Series(["NB01", "NB03"], name = "barcode"))
         error_msg = ("\nOne or more barcodes are duplicated. Each barcode may only be used once:\n"
                      f"{duplicates}")
-        with pytest.raises(Exception, match=re.escape(error_msg)):
+        info_msgs = ["Checking that the necessary columns exist ...", "All necessary columns found ✓",
+                     "Checking that the barcodes are correctly formatted ...", "Barcodes are correct ✓",
+                     "Checking that the barcodes are unique ..."]
+        with (pytest.raises(ValueError, match=re.escape(error_msg)),
+              self._caplog.at_level(logging.DEBUG, logger="seq_mon")):
             seq_mon.validate_samplesheet(test_sheet, ref_is_file = True)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
 
     def test_success(self):
         """Don't complain if everything looks good."""
-        pass # TODO: second pass, return a bool and log things
+        test_sheet = pd.DataFrame(data={"sample_id": ["test1", "test2", "test3", "test4"],
+                                        "barcode": ["NB01", "NB02", "NB03", "NB04"],
+                                        "reference": ["nCoV-2019.reference.fa", "nCoV-2019.reference.fa",
+                                                      "nCoV-2019.reference.fa", "nCoV-2019.reference.fa"],
+                                        "ct": ["10", "20", "30", np.nan],
+                                        "other_columns1": ["A", "B", "C", "D"],
+                                        "other_columns2": ["1", "2", "3", "4"]
+                                        })
+        info_msgs = ["Checking that the necessary columns exist ...", "All necessary columns found ✓",
+                     "Checking that the barcodes are correctly formatted ...", "Barcodes are correct ✓",
+                     "Checking that the barcodes are unique ...", "All barcodes are unique ✓",
+                     "These are the samples from the samplesheet you have given:\n"
+                     f"{test_sheet.to_string()}\n//"]
+        with self._caplog.at_level(logging.INFO, logger="seq_mon"):
+            seq_mon.validate_samplesheet(test_sheet, ref_is_file=True)
+            for info_msg in info_msgs:
+                assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
+
 
 class TestValidateRundir(unittest.TestCase):
     @pytest.fixture(autouse=True)
@@ -489,6 +556,10 @@ class TestValidateRundir(unittest.TestCase):
 
 
 class TestCreateWorkflowTable(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
+
     test_dir = pathlib.Path(__file__).parent / "data" / "workflow_table" / "rundir" / "test_dir" / "fastq_pass"
 
     def test_fail_bad_barcodes(self):
@@ -502,7 +573,7 @@ class TestCreateWorkflowTable(unittest.TestCase):
                                      "other_columns2": ["1", "2", "3", "4"]
                                      })
         error_msg = "Barcodes in samplesheet are not acceptable"
-        with pytest.raises(Exception, match=re.escape(error_msg)):
+        with pytest.raises(ValueError, match=re.escape(error_msg)):
             seq_mon.create_workflow_table(test_df, self.test_dir)
 
     # TODO handling of workflow tables that end up empty after removing barcodes without sample ID?
@@ -531,8 +602,10 @@ class TestCreateWorkflowTable(unittest.TestCase):
                                          "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
 
                                      })
-        test_result = seq_mon.create_workflow_table(test_df, self.test_dir)
-        print(test_result.columns)
+        info_msg = f"Continuing with the following barcodes:\n{expected_df.to_string()}\n//"
+        with self._caplog.at_level(logging.INFO, logger="seq_mon"):
+            test_result = seq_mon.create_workflow_table(test_df, self.test_dir)
+            assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
         pd.testing.assert_frame_equal(expected_df, test_result)
 
     def test_success_nb(self):
@@ -559,7 +632,10 @@ class TestCreateWorkflowTable(unittest.TestCase):
                                          "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
 
                                          })
-        test_result = seq_mon.create_workflow_table(test_df, self.test_dir)
+        info_msg = f"Continuing with the following barcodes:\n{expected_df.to_string()}\n//"
+        with self._caplog.at_level(logging.INFO, logger="seq_mon"):
+            test_result = seq_mon.create_workflow_table(test_df, self.test_dir)
+            assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
         pd.testing.assert_frame_equal(expected_df, test_result)
 
 
@@ -587,7 +663,10 @@ class TestCreateWorkflowTable(unittest.TestCase):
                                                           str(self.test_dir / "barcode04")],
                                          "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
                                          })
-        test_result = seq_mon.create_workflow_table(test_df, self.test_dir)
+        info_msg = f"Continuing with the following barcodes:\n{expected_df.to_string()}\n//"
+        with self._caplog.at_level(logging.INFO, logger="seq_mon"):
+            test_result = seq_mon.create_workflow_table(test_df, self.test_dir)
+            assert ("seq_mon", logging.INFO, info_msg) in self._caplog.record_tuples
         pd.testing.assert_frame_equal(expected_df, test_result)
 
 
@@ -611,8 +690,8 @@ class TestUpdatePlot(unittest.TestCase):
                                  "barcode_basename": ["barcode01", "barcode02"]
                                  })
     test_outdir =  pathlib.Path(__file__).parent / "data" / "out_dir"
-    test_ref = str(pathlib.Path(__file__).parent / "data" / "ref_dir")
-    test_samplesheet = str(pathlib.Path(__file__).parent / "data" / "samplesheet.xls")
+    test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir"
+    test_samplesheet = pathlib.Path(__file__).parent / "data" / "samplesheet.xls"
 
     def tearDown(self):
         to_clean = [self.test_outdir / "RB01.bam", self.test_outdir / "RB02.bam",
@@ -633,8 +712,8 @@ class TestUpdatePlot(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_success_already_opened(self, mock_create_bam, mock_run):
         """Successfully update the plot when the browser is already open"""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
-                                          maxDepth=100, reference=self.test_ref, out_base=str(self.test_outdir))
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         test_report.set_open_status(True)
         assert test_report.is_open
         mock_subprocess = mock.Mock()
@@ -650,7 +729,7 @@ class TestUpdatePlot(unittest.TestCase):
                              "params = list(threshold = ", "10",
                              ", maxDepth= ", "100", ", path = ",
                              "\'" + str(self.test_outdir) + "\', samplesheet = ",
-                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + str(self.test_samplesheet) + "\', region_file = ",
                              "\'" + "" + "\'))\""]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
@@ -678,8 +757,8 @@ class TestUpdatePlot(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_success_open_window(self, mock_create_bam, mock_run):
         """Successfully update the plot when the browser is not yet open; update report status"""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
-                                          maxDepth=100, reference=self.test_ref, out_base=str(self.test_outdir))
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         assert not test_report.is_open
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
@@ -694,7 +773,7 @@ class TestUpdatePlot(unittest.TestCase):
                     "params = list(threshold = ", "10",
                     ", maxDepth= ", "100", ", path = ",
                     "\'" + str(self.test_outdir) + "\', samplesheet = ",
-                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + str(self.test_samplesheet) + "\', region_file = ",
                     "\'" + "" + "\'))\""]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
@@ -721,10 +800,10 @@ class TestUpdatePlot(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_success_single_ref(self, mock_create_bam, mock_run):
         """Update the plot when we're using a single reference and a region file"""
-        test_report = seq_mon.CoverReport(str(self.test_dir), sample_sheet=self.test_samplesheet, threshold=10,
-                                          maxDepth=100, reference=f"{self.test_ref}/test_ref.fa",
-                                          out_base=str(self.test_outdir),
-                                          region_file=f"{self.test_ref}/test_region.bed")
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=self.test_ref / "test_ref.fa",
+                                          out_base=self.test_outdir,
+                                          region_file=self.test_ref / "test_region.bed")
         assert not test_report.is_open
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
@@ -739,7 +818,7 @@ class TestUpdatePlot(unittest.TestCase):
                     "params = list(threshold = ", "10",
                     ", maxDepth= ", "100", ", path = ",
                     "\'" + str(self.test_outdir) + "\', samplesheet = ",
-                    "\'" + self.test_samplesheet + "\', region_file = ",
+                    "\'" + str(self.test_samplesheet) + "\', region_file = ",
                     "\'" + f"{self.test_ref}/test_region.bed" + "\'))\""]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
