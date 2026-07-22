@@ -1,0 +1,10 @@
+{
+  "fastq_dir":  "tests/data/workflow_table/rundir/test_dir/fastq_pass",
+  "sample_sheet":  "tests/data/samplesheet.xls",
+  "out_base": "tests/data/out_dir_2",
+  "reference": "tests/data/ref_dir",
+  "threshold": 100,
+  "maxDepth": 1000,
+  "region_file": "None",
+  "processed_files": []
+}

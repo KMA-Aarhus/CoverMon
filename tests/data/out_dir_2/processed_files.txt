@@ -1,1 +1,1 @@
-data/workflow_table/rundir/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz
+tests/data/workflow_table/rundir/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz

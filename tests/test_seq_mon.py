@@ -1,3 +1,4 @@
+import json
 import logging
 import pathlib
 import re
@@ -33,6 +34,11 @@ class TestCoverReport(unittest.TestCase):
     test_samplesheet = pathlib.Path(__file__).parent / "data"/"samplesheet.xls"
 
     # TODO check table generation
+
+    def tearDown(self):
+        settings = self.test_outdir / "settings.json"
+        if settings.exists():
+            settings.unlink()
 
     def test_sense_check_thresholds(self):
         """Fail if maximum coverage reported is below minimum coverage."""
@@ -193,7 +199,7 @@ class TestCoverReport(unittest.TestCase):
                         "threshold=10, maxDepth=100,"
                         f" reference={self.test_ref}, region_file=None,"
                         f" out_base={self.test_outdir}, processed_files=[], is_open=False)\n"
-                        f"Workflow table:\n{self.test_df.head().to_string()}")
+                        f"Workflow table:\n{self.test_df.to_string()}")
         test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                           maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
         test_str = test_report.__repr__()
@@ -203,9 +209,9 @@ class TestCoverReport(unittest.TestCase):
                               f" reference={self.test_ref}, region_file=None,"
                               f" out_base={self.test_outdir}, "
                               "processed_files=['path/to/processed_1.fq', 'path/to/processed_2.fq'], is_open=False)\n"
-                              f"Workflow table:\n{self.test_df.head().to_string()}")
-        test_report.add_processed_file("path/to/processed_1.fq")
-        test_report.add_processed_file("path/to/processed_2.fq")
+                              f"Workflow table:\n{self.test_df.to_string()}")
+        test_report.add_processed_file(pathlib.Path("path/to/processed_1.fq"))
+        test_report.add_processed_file(pathlib.Path("path/to/processed_2.fq"))
         test_processed = test_report.__repr__()
         assert expected_processed == test_processed
         test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir" / "test_ref.fa"
@@ -220,6 +226,60 @@ class TestCoverReport(unittest.TestCase):
                                             region_file=test_region)
         region_str = region_report.__repr__()
         assert expected_region == region_str
+
+    def test_save_settings(self):
+        """Save the settings of a CoverReport in order to be able to resume."""
+        settings = self.test_outdir / "settings.json"
+        assert not settings.exists()
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
+                                          maxDepth=100, reference=self.test_ref, out_base=self.test_outdir)
+        to_add = ["path/to/processed.fq", "path/to/processed_2.fq"]
+        test_report.add_processed_files([pathlib.Path(processed) for processed in to_add])
+        # TODO: do we want to move the processed files to the settings?
+        expected_results = {"fastq_dir": str(self.test_dir), "sample_sheet": str(self.test_samplesheet), "threshold": 10,
+                            "maxDepth": 100, "reference": str(self.test_ref), "out_base": str(self.test_outdir),
+                            "processed_files": to_add,
+                            "region_file": None}
+        test_report.save_settings()
+        assert settings.exists()
+        with open(settings, "r", encoding = "utf-8") as settings_file:
+            test_settings = json.load(settings_file)
+        assert expected_results == test_settings
+
+
+class TestLoadSettings(unittest.TestCase):
+    def test_success_load(self):
+        """Regenerate a CoverReport from saved settings."""
+        test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir"
+        test_samplesheet = pathlib.Path(__file__).parent / "data" / "samplesheet.xls"
+        expected_report = seq_mon.CoverReport(indir = (pathlib.Path(__file__).parent / "data"  / "workflow_table" /
+                                                       "rundir"),
+                                              sample_sheet = test_samplesheet,
+                                              threshold = 100,
+                                              maxDepth = 1000,
+                                              reference = test_ref,
+                                              out_base = pathlib.Path(__file__).parent / "data" / "out_dir_2")
+        processed = (pathlib.Path(__file__).parent / 'data' /'workflow_table'/
+                     'rundir'/'test_dir'/'fastq_pass'/'barcode01'/'barcode01-0.fastq.gz')
+        expected_report.add_processed_file(processed)
+        settings = pathlib.Path(__file__).parent / "data" / "out_dir_2"/ "settings.json"
+        test_report = seq_mon.load_report_from_settings(settings)
+        assert expected_report == test_report
+
+    def test_success_no_processed(self):
+        """Regenerate a CoverReport from saved settings when there are no processed files."""
+        test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir"
+        test_samplesheet = pathlib.Path(__file__).parent / "data" / "samplesheet.xls"
+        expected_report = seq_mon.CoverReport(indir = (pathlib.Path(__file__).parent / "data"  / "workflow_table" /
+                                                       "rundir"),
+                                              sample_sheet = test_samplesheet,
+                                              threshold = 100,
+                                              maxDepth = 1000,
+                                              reference = test_ref,
+                                              out_base = pathlib.Path(__file__).parent / "data" / "out_dir_2")
+        settings = pathlib.Path(__file__).parent / "data" / "test_no_processed.json"
+        test_report = seq_mon.load_report_from_settings(settings)
+        assert expected_report == test_report
 
 
 class TestCreateBam(unittest.TestCase):
@@ -677,6 +737,7 @@ def bam_creator(*args) -> None:
     for bam in [test_outdir / "RB01.bam", test_outdir / "RB02.bam"]:
         bam.touch()
 
+# TODO: adapt to save settings in addition to or instead of just documenting opened files
 class TestUpdatePlot(unittest.TestCase):
     test_dir = pathlib.Path(__file__).parent / "data" / "workflow_table" / "rundir" / "test_dir" / "fastq_pass"
     test_df = pd.DataFrame(data={"sample_id": ["test1", "test2"],
@@ -692,10 +753,12 @@ class TestUpdatePlot(unittest.TestCase):
     test_outdir =  pathlib.Path(__file__).parent / "data" / "out_dir"
     test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir"
     test_samplesheet = pathlib.Path(__file__).parent / "data" / "samplesheet.xls"
+    test_settings = test_outdir / "settings.json"
 
     def tearDown(self):
         to_clean = [self.test_outdir / "RB01.bam", self.test_outdir / "RB02.bam",
-                    self.test_outdir / "RB01.depth", self.test_outdir / "RB02.depth"]
+                    self.test_outdir / "RB01.depth", self.test_outdir / "RB02.depth",
+                    self.test_settings]
         with open((self.test_outdir / "processed_files.txt"), "w", encoding = "utf-8") as f:
             f.write("")
         for test_file in to_clean:
@@ -733,6 +796,7 @@ class TestUpdatePlot(unittest.TestCase):
                              "\'" + "" + "\'))\""]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
+        assert not self.test_settings.exists()
         with self._caplog.at_level(logging.DEBUG, logger = "seq_mon"):
             seq_mon.update_plot(test_report)
             assert ("seq_mon", logging.INFO, scanning) in self._caplog.record_tuples
@@ -743,6 +807,9 @@ class TestUpdatePlot(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
             assert not ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
         assert test_report.is_open
+        assert self.test_settings.exists()
+        found_settings = seq_mon.load_report_from_settings(self.test_settings)
+        found_settings.set_open_status(True)  # this defaults to False when loading
         expected_processed = [self.test_dir / "barcode01" / "barcode01-0.fastq.gz",
                               self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
                               self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
@@ -750,6 +817,7 @@ class TestUpdatePlot(unittest.TestCase):
         with open((self.test_outdir / "processed_files.txt"), "r", encoding = "utf-8") as f:
             processed_from_file = f.read().splitlines()
         assert sorted([str(processed) for processed in expected_processed]) == sorted(processed_from_file)
+        assert found_settings == test_report
         mock_run.assert_has_calls([plot_call])
 
 
@@ -779,6 +847,7 @@ class TestUpdatePlot(unittest.TestCase):
         plot_call = mock.call(plot_msg, shell=True, check=True)
         open_cmd = "gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + str(self.test_outdir) + "\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\""
         open_call = mock.call(open_cmd, shell=True, check=True)
+        assert not self.test_settings.exists()
         with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
             seq_mon.update_plot(test_report)
             assert ("seq_mon", logging.INFO, scanning) in self._caplog.record_tuples
@@ -789,6 +858,7 @@ class TestUpdatePlot(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
         assert test_report.is_open
+        assert self.test_settings.exists()
         expected_processed = [self.test_dir / "barcode01" / "barcode01-0.fastq.gz",
                               self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
                               self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
@@ -851,13 +921,16 @@ class TestStartCovermon(unittest.TestCase):
         to_clean = [self.test_outdir / "RB01.bam", self.test_outdir / "RB02.bam",
                     self.test_outdir / "RB01.depth", self.test_outdir / "RB02.depth",
                     self.test_outdir / "sample_sheet_given.tsv",
+                    self.test_outdir / "settings.json",
                     self.test_default_out / "RB01.bam", self.test_default_out / "RB02.bam",
                     self.test_default_out / "RB01.depth", self.test_default_out / "RB02.depth",
                     self.test_default_out / "sample_sheet_given.tsv", self.test_default_out / "processed_files.txt",
+                    self.test_default_out / "settings.json",
                     self.test_default_ref_is_dir / "RB01.bam", self.test_default_ref_is_dir / "RB02.bam",
                     self.test_default_ref_is_dir / "RB01.depth", self.test_default_ref_is_dir / "RB02.depth",
                     self.test_default_ref_is_dir / "sample_sheet_given.tsv",
                     self.test_default_ref_is_dir / "processed_files.txt",
+                    self.test_default_ref_is_dir / "settings.json",
                     self.test_out_existing / "RB02.bam", self.test_out_existing / "RB02.depth",
                     self.test_out_existing / "sample_sheet_given.tsv"]
         for test_file in to_clean:
@@ -866,7 +939,19 @@ class TestStartCovermon(unittest.TestCase):
         with open((self.test_outdir / "processed_files.txt"), "w", encoding="utf-8") as f:
             f.write("")
         with open(self.test_out_existing / "processed_files.txt", "w", encoding="utf-8") as f:
-            f.write("data/workflow_table/rundir/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz")
+            f.write("tests/data/workflow_table/rundir/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz")
+        with open(self.test_out_existing / "settings.json", "w", encoding="utf-8") as f:
+            settings = """{
+  "fastq_dir":  "tests/data/workflow_table/rundir/test_dir/fastq_pass",
+  "sample_sheet":  "tests/data/samplesheet.xls",
+  "out_base": "tests/data/out_dir_2",
+  "reference": "tests/data/ref_dir",
+  "threshold": 100,
+  "maxDepth": 1000,
+  "region_file": "None",
+  "processed_files": ["tests/data/workflow_table/rundir/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz"]
+}"""
+            f.write(settings)
         dirs_to_clean = [self.test_default_out, self.test_default_ref_is_dir]
         for dir_to_clean in dirs_to_clean:
             if dir_to_clean.exists():
@@ -1039,6 +1124,56 @@ class TestStartCovermon(unittest.TestCase):
         assert (self.test_outdir / "sample_sheet_given.tsv").exists()
         mock_run.assert_has_calls([plot_call, sync_call], any_order = True)
 
+
+    @mock.patch(f"{seq_mon.__name__}.subprocess.run")
+    @mock.patch(f"{seq_mon.__name__}.create_bam")
+    def test_fail_wrong_settings(self, mock_create_bam, mock_run):
+        """Fail if continuing in a directory with different settings."""
+        mock_subprocess = mock.Mock()
+        mock_run.return_value = mock_subprocess
+        mock_create_bam.side_effect = bam_creator
+        cover_threshold = "100"
+        max_depth = "1000"
+        sheet = pd.DataFrame(data={"sample_id": ["test1", "test2", "test3", "test4"],
+                                            "barcode": ["NB01", "NB02", "NB03", "NB04"],
+                                            "reference": ["nCoV-2019.reference.fa", "nCoV-2019.reference.fa",
+                                                          "nCoV-2019.reference.fa", "nCoV-2019.reference.fa"],
+                                            "ct": [10, 20, 30, np.nan],
+                                            "other_columns1": ["A", "B", "C", "D"],
+                                            "other_columns2": [1, 2, 3, 4],
+                                   "barcode_path": [str(self.test_indir / "test_dir" / "fastq_pass" / "barcode01"),
+                                                    str(self.test_indir / "test_dir" / "fastq_pass" /"barcode02"),
+                                                    str(self.test_indir / "test_dir" / "fastq_pass" /"barcode03"),
+                                                    str(self.test_indir /"test_dir" / "fastq_pass" /  "barcode04")],
+                                   "barcode_basename": ["barcode01", "barcode02", "barcode03", "barcode04"]
+                                            })
+        start_args = [self.test_samplesheet, str(self.test_indir), f"{self.test_ref}/test_ref.fa", cover_threshold,
+                      max_depth, "--outdir", str(self.test_out_existing)]
+        error_msg = ("Attempting to continue an interrupted run with different settings. Please choose a different"
+                     " output directory to run analysis with the new settings.\n"
+                     "Old settings:\n"
+                     f"CoverReport(fastq_dir={str(self.test_indir / 'test_dir' / 'fastq_pass')},"
+                     f" sample_sheet={self.test_samplesheet}, "
+                     "threshold=100, maxDepth=1000,"
+                     f" reference={self.test_ref}, region_file=None,"
+                     f" out_base={self.test_out_existing}, "
+                     f"processed_files=['{self.test_indir}/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz'],"
+                     " is_open=False)\n"
+                     f"Workflow table:\n{sheet.head().to_string()}\n"
+                     f"New settings:\n"
+                     f"CoverReport(fastq_dir={str(self.test_indir / 'test_dir' / 'fastq_pass')},"
+                     f" sample_sheet={self.test_samplesheet}, "
+                     "threshold=100, maxDepth=1000,"
+                     f" reference={self.test_ref}/test_ref.fa, region_file=None,"
+                     f" out_base={self.test_out_existing}, "
+                     f"processed_files=['{self.test_indir}/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz'],"
+                     " is_open=False)\n"
+                     f"Workflow table:\n{sheet.head().to_string()}")
+        with pytest.raises(ValueError, match=re.escape(error_msg)):
+            print(error_msg)
+            seq_mon.start_covermon(start_args)
+
+
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_existing_processed(self, mock_create_bam, mock_run):
@@ -1055,6 +1190,7 @@ class TestStartCovermon(unittest.TestCase):
                      f"This is the threshold: {cover_threshold}", f"This is the maxDepth in plot: {max_depth}",
                      f"Creating output directory {self.test_out_existing}...",
                      "I have found processed files, opening existing report",
+                     "Current settings match saved settings",
                      "  The sequencing summary has been found. Run complete    ✓"]
         initializing_msg = "Initializing report as closed"
         plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
