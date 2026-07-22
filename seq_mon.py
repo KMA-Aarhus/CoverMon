@@ -1,7 +1,11 @@
+"""Monitor an ongoing sequencing run and visualize results."""
+
 __author__ = "Tine Sneibjerg Ebsen, Kat Steinke"
 __version__ = "0.3"
 
 import argparse
+import copy
+import json
 import logging
 import pathlib
 import subprocess
@@ -60,11 +64,11 @@ class CoverReport:
         # sense checks first
         if threshold > maxDepth:
             raise ValueError("Highest reported coverage must exceed minimum required coverage.")
-        if pathlib.Path(reference).is_dir() and region_file is not None:
+        if reference.is_dir() and region_file is not None:
             raise ValueError("Cannot supply a region file when different references per sample are used "
                              "(base ref is a directory)")
-        dummy, self.fastq_dir = validate_rundir(pathlib.Path(indir))
-        self.reference = pathlib.Path(reference)  # TODO: rework to take a Path to begin with?
+        dummy, self.fastq_dir = validate_rundir(indir)
+        self.reference = reference
         self.sample_sheet = sample_sheet
         # sample sheet validation happens here
         df = parse_samplesheet(self.sample_sheet)
@@ -80,7 +84,7 @@ class CoverReport:
                 covermon_dirname = f"{covermon_dirname}_{self.reference.stem}"
             self.out_base = self.fastq_dir.parent / covermon_dirname
         self.is_open = False  # TODO: can we assume this?
-        self.processed_files = []
+        self.processed_files: List[pathlib.Path] = []
         self.region_file = region_file
 
     def __eq__(self, other: object) -> bool:
@@ -101,9 +105,11 @@ class CoverReport:
         return(f"CoverReport(fastq_dir={self.fastq_dir}, sample_sheet={self.sample_sheet}, "
                f"threshold={self.threshold}, maxDepth={self.maxDepth},"
                f" reference={self.reference}, region_file={self.region_file},"
-               f" out_base={self.out_base}, processed_files={self.processed_files},"
+               f" out_base={self.out_base}, processed_files={[str(processed) for processed in self.processed_files]},"
                f" is_open={self.is_open})\n"
                f"Workflow table:\n{self.workflow_table.head().to_string()}")
+
+    # TODO: convenience comparison?
 
     def set_open_status(self, open_status: bool) -> None:
         """Set the report's status to open (True) or closed (False)
@@ -130,9 +136,44 @@ class CoverReport:
         """
         self.processed_files.extend(processed_files)
 
+    def save_settings(self) -> None:
+        """Save the report's properties."""
+        settings = copy.deepcopy(vars(self))
+        path_settings = {"reference", "fastq_dir", "sample_sheet", "out_base", "region_file"}
+        settings["processed_files"] = [str(processed) for processed in settings["processed_files"]]
+        settings = {key: str(value) if key in path_settings and value is not None else value
+                    for key, value in settings.items()}
+        settings.pop("workflow_table")
+        settings.pop("is_open")  # might be incorrectly set if the run is interrupted
+        out_file = self.out_base / "settings.json"
+        with open(out_file, "w", encoding = "utf-8") as settings_file:
+            json.dump(settings, settings_file, indent = 4)
 
 
-# TODO config?
+# TODO - leverage this for a convenient "--resume" flag?
+def load_report_from_settings(settings_file: pathlib.Path) -> CoverReport:
+    """Load a CoverReport from a settings.json file.
+
+    Args:
+        settings_file: the file from which to load settings
+
+    Returns:
+        The report defined by the archived settings
+    """
+    with open(settings_file, "r", encoding="utf-8") as settings:
+        existing_vars = json.load(settings)
+        existing_vars["indir"] = existing_vars.pop("fastq_dir")
+        processed = [pathlib.Path(processed_file).resolve() for processed_file in existing_vars.pop("processed_files")]
+    path_settings = {"reference", "indir", "sample_sheet", "out_base", "region_file"}
+    # we might have some ugly Nones
+    existing_vars = {key: pathlib.Path(value).resolve() if key in path_settings and value and value != "None"
+                    else value
+                    for key, value in existing_vars.items()}
+    # clean the Nones
+    existing_vars = {key: None if value == "None" else value for key, value in existing_vars.items()}
+    report = CoverReport(**existing_vars)
+    report.add_processed_files(processed)
+    return report
 
 def parse_samplesheet(samplesheet: pathlib.Path) -> pd.DataFrame:
     """Clean an Excel sample sheet.
@@ -319,6 +360,7 @@ def create_workflow_table(samplesheet: pd.DataFrame, fastq_pass_dir: pathlib.Pat
     logger.info(f"Continuing with the following barcodes:\n{workflow_table.to_string()}\n//")
     return workflow_table
 
+# we probably have to keep this until we've established that nothing else uses it
 def write_to_processed(to_write: str, out_dir: pathlib.Path) -> None:
     """Append the given string to "processed_files.txt" in the specified outdir
 
@@ -394,13 +436,14 @@ def get_depth(bam: pathlib.Path, depth_out: pathlib.Path) -> None:
     logger.debug(plot_cov_cmd2)
     subprocess.run(plot_cov_cmd2.split(), check = True)
 
+
+# TODO remember to save the files here
 def update_plot(active_report: CoverReport) -> None:
     """Create or update the coverage plot for a given report and show plot in a browser window
 
     Args:
         active_report:  the CoverReport to plot
     """
-    # TODO: allow for different outfiles here - everything needs a unique ID eventually
     # Define temporary mapping files which will be used for merging new mapping of new output files with existing
     workflow_table = active_report.workflow_table.copy(deep=True)
     out_base = active_report.out_base
@@ -414,24 +457,26 @@ def update_plot(active_report: CoverReport) -> None:
         depth = row["depth"]
         barcode_path = pathlib.Path(row['barcode_path'])
         reference = row["reference"]
-        unprocessed = [f.resolve() for f in barcode_path.iterdir() if
-                       (f.resolve() not in active_report.processed_files and f.is_file()
-                        and {".fastq", ".fq"}.intersection(f.suffixes))]
+        unprocessed = [barcode_file.resolve() for barcode_file in barcode_path.iterdir() if
+                       (barcode_file.resolve() not in active_report.processed_files and barcode_file.is_file()
+                        and {".fastq", ".fq"}.intersection(barcode_file.suffixes))]
 
-        for f in unprocessed:
+        for unprocessed_file in unprocessed:
             # Check if we have an existing read mapping to append to.
             # If not, creates the first one and continues the loop without merging.
             if not bam_out.exists():
-                create_bam(f, out_base, bam_out, reference)
-                active_report.add_processed_file(f)
-                write_to_processed(str(f), out_base)
+                create_bam(unprocessed_file, out_base, bam_out, reference)
+                active_report.add_processed_file(unprocessed_file)
+                write_to_processed(str(unprocessed_file), out_base)
+                active_report.save_settings()
 
                 logger.info(f"Number of processed files: {len(active_report.processed_files)}")
             else:
                 # Maps new reads to reference
-                append_bam(f, out_base, bam_out, reference)
-                active_report.add_processed_file(f)
-                write_to_processed(str(f), out_base)
+                append_bam(unprocessed_file, out_base, bam_out, reference)
+                active_report.add_processed_file(unprocessed_file)
+                write_to_processed(str(unprocessed_file), out_base)  # TODO: replace with saving settings?
+                active_report.save_settings()
 
                 logger.info(f"Number of processed files: {len(active_report.processed_files)}")
             # Index the new bam and calculate depth. Then creates the monitoring html
@@ -494,7 +539,7 @@ def start_covermon(start_args) -> None:
     # initialize the report
     # Set an open_report state to stop opening multiple reports
     logger.debug("Initializing report as closed")
-    report = CoverReport(rundir, pathlib.Path(args.samplesheet), args.threshold, args.maxdepth,
+    report = CoverReport(rundir, pathlib.Path(args.samplesheet), int(args.threshold), int(args.maxdepth),
                          pathlib.Path(args.reference), out_dir, region_file)
 
     if report.region_file is not None:
@@ -522,12 +567,27 @@ def start_covermon(start_args) -> None:
     # Start CoverMon #
     ##################
     # Keep track of processed files to avoid starting from scratch if script is terminated
-    if (report.out_base / "processed_files.txt").exists() and not report.is_open:  # TODO: it'll always be closed?
-        # TODO: when we can run multiple scripts, make sure we're restarting with the same settings
+    if ((report.out_base / "processed_files.txt").exists() and (report.out_base / "settings.json").exists()
+            and not report.is_open):  # TODO: it'll always be closed?
         logger.info("I have found processed files, opening existing report")
+        old_report = load_report_from_settings(report.out_base / "settings.json")
+
+        # TODO: use the processed files from the old report settings?
         with open(report.out_base / "processed_files.txt", "r", encoding = "utf-8") as processed_files_txt:
-            processed_files = [pathlib.Path(processed) for processed in processed_files_txt.read().splitlines()]
+            processed_files = [pathlib.Path(processed).resolve()
+                               for processed in processed_files_txt.read().splitlines()]
             report.add_processed_files(processed_files)
+        if old_report != report:
+            error_msg = ("Attempting to continue an interrupted run with different settings."
+                             " Please choose a different"
+                             " output directory to run analysis with the new settings.\n"
+                             "Old settings:\n"
+                             f"{old_report}\n"
+                             "New settings:\n"
+                             f"{report}")
+            raise ValueError(error_msg)
+        logger.info("Current settings match saved settings")
+
         # Starts browser-sync in a new terminal. This will not work on windows or macOS.
         browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{report.out_base}\" "
                         "--host 127.0.0.1 --port 9000 --index \"plot_cov.html\"")
