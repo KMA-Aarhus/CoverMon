@@ -42,16 +42,11 @@ knitr::opts_chunk$set(
     , message = FALSE
 )
 # Load required libraries
-if (!require("tidyverse")) {
-install.packages("tidyverse") }
-if (!require("RColorBrewer")) {
-install.packages("RColorBrewer") }
-if (!require("cowplot")) {
-install.packages("cowplot") }
-if (!require("ggthemes")) {
-install.packages("ggthemes") }
-if (!require("kableExtra")) {
-install.packages("kableExtra") }
+library("tidyverse")
+library("RColorBrewer")
+library("cowplot")
+library("ggthemes")
+library("kableExtra")
 plot_regions = FALSE
 
 ## Pull in the data
