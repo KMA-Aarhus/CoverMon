@@ -109,8 +109,6 @@ class CoverReport:
                f" is_open={self.is_open})\n"
                f"Workflow table:\n{self.workflow_table.head().to_string()}")
 
-    # TODO: convenience comparison?
-
     def set_open_status(self, open_status: bool) -> None:
         """Set the report's status to open (True) or closed (False)
 
@@ -294,10 +292,11 @@ def validate_rundir(rundir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
             fastq_pass_bases = list(rundir.glob("**/fastq_pass"))
             if fastq_pass_bases:
                 if len(fastq_pass_bases) > 1:
+                    bad_paths = '\n '.join([str(base) for base in fastq_pass_bases])
                     error_msg = ("There seems to be more than one fastq_pass sub-directory beneath the given rundir."
                             " These paths were found:\n"
-                            f" {'\n '.join([str(base) for base in fastq_pass_bases])}\n"
-                            "Please specify a more specific rundir.")
+                            f"{bad_paths}"
+                            "\nPlease specify a more specific rundir.")
                     raise ValueError(error_msg)
 
                 fastq_pass_base = fastq_pass_bases[0]
@@ -409,7 +408,7 @@ def append_bam(fastq: pathlib.Path, out_base: pathlib.Path, out_bam: pathlib.Pat
     logger.debug(map_cmd)
     subprocess.run(map_cmd.split(), check = True)
     # Sort the mapping files for merging
-    sort_cmd = f'samtools sort -O bam -o {out_base}/sorted.bam {tmpsam}'  # TODO keep in mind when allowing more
+    sort_cmd = f'samtools sort -O bam -o {out_base}/sorted.bam {tmpsam}'
     logger.debug(sort_cmd)
     subprocess.run(sort_cmd.split(), check = True)
     # Merges the sorted files
@@ -417,7 +416,7 @@ def append_bam(fastq: pathlib.Path, out_base: pathlib.Path, out_bam: pathlib.Pat
     logger.debug(merge_cmd)
     subprocess.run(merge_cmd.split(), check = True)
     # Sets the new bam to the barcode bam and marks file as processed
-    subprocess.run(['mv', tmpbam, out_bam], check = True)  # TODO keep in mind when moving
+    subprocess.run(['mv', tmpbam, out_bam], check = True)
 
 
 def get_depth(bam: pathlib.Path, depth_out: pathlib.Path) -> None:
@@ -481,21 +480,17 @@ def update_plot(active_report: CoverReport) -> None:
                 logger.info(f"Number of processed files: {len(active_report.processed_files)}")
             # Index the new bam and calculate depth. Then creates the monitoring html
             get_depth(bam_out, depth)
-            # Getting the below line to run was a pain. Hence, it is presented as a list.
-            # TODO: make this a script of its own so we can run it more nicely
-            # TODO: ensure it writes to a unique file for each run
-            region_file = active_report.region_file if active_report.region_file else ""
-            plot_cov_cmd3 = ["Rscript", "-e", "\"rmarkdown::render(input = ", "'scripts/plot_cov.Rmd',",
-                             "params = list(threshold = ", str(active_report.threshold),
-                             ", maxDepth= ", str(active_report.maxDepth), ", path = ",
-                             "'" + str(out_base) + "', samplesheet = ", "'" + str(active_report.sample_sheet) + "', region_file = ",
-                             "'" + str(region_file) + "'))\""]
+            plot_cov_cmd3 = ["Rscript",
+                             str(pathlib.Path(__file__).parent.resolve() / "scripts" / "run_plot.R"),
+                             str(out_base.resolve()),
+                             str(active_report.sample_sheet.resolve()),
+                             str(active_report.threshold),
+                             str(active_report.maxDepth)]
+            if active_report.region_file:
+                plot_cov_cmd3.extend(["--region_file", str(active_report.region_file)])
 
             logger.debug(" ".join(plot_cov_cmd3))
             subprocess.run(" ".join(plot_cov_cmd3), shell=True, check = True)
-            # TODO can't we output it somewhere else?
-            subprocess.run(['mv', 'scripts/plot_cov.html', out_base], check = True)
-
             # Starts browser-sync in a new terminal if the report is not open. This will not work on windows or macOS.
             logger.info("Updated plot")
             if not active_report.is_open:
@@ -557,8 +552,8 @@ def start_covermon(start_args) -> None:
     logger.info(f"Creating output directory {report.out_base}...")
     report.out_base.mkdir(parents=True, exist_ok=True)
 
-    # back up sample sheet
-    df = parse_samplesheet(report.sample_sheet)  # TODO: doing this twice - should we give the CoverReport yet another attribute?
+    # back up sample sheet - TODO: doing this twice - should we give the CoverReport yet another attribute?
+    df = parse_samplesheet(report.sample_sheet)
     sample_sheet_out = report.out_base / "sample_sheet_given.tsv"
     logger.info("Backing up the original sample sheet...")
     df.to_csv(sample_sheet_out, sep = "\t", index=False, na_rep='NA')
@@ -588,7 +583,7 @@ def start_covermon(start_args) -> None:
             raise ValueError(error_msg)
         logger.info("Current settings match saved settings")
 
-        # Starts browser-sync in a new terminal. This will not work on windows or macOS.
+        # Starts browser-sync in a new terminal. This will not work on windows or macOS. TODO platform agnostic implementation?
         browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{report.out_base}\" "
                         "--host 127.0.0.1 --port 9000 --index \"plot_cov.html\"")
         subprocess.run(browser_sync, shell = True, check = True)
@@ -606,7 +601,6 @@ def start_covermon(start_args) -> None:
         update_plot(report)
 
         # Continue the monitor as long as the sequence summary does not exist. Wait <seconds_wait> between scans.
-        # TODO: rework this so we can rerun/run in parallel
         sequencing_summary_file = list(report.fastq_dir.parent.glob("sequencing_summary_*.txt"))
         if len(sequencing_summary_file) == 0:
             print(f"  Still sequencing/basecalling; waiting {seconds_wait} seconds before next scan ...")

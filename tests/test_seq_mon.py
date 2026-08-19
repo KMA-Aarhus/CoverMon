@@ -588,9 +588,10 @@ class TestValidateRundir(unittest.TestCase):
         """Raise an exception if there are too many fastq_pass directories."""
         test_dir = pathlib.Path(__file__).parent / "data" / "rundir"
         fastq_pass_dirs = [str(test_dir / "test1" / "fastq_pass"), str(test_dir / "test2" / "fastq_pass")]
+        bad_paths = str('\n ').join(fastq_pass_dirs)
         error_msg = ("There seems to be more than one fastq_pass sub-directory beneath the given rundir."
                      " These paths were found:\n"
-                     f" {str('\n ').join(fastq_pass_dirs)}\n"
+                     f"{bad_paths}\n"
                      "Please specify a more specific rundir.")
         with pytest.raises(ValueError, match=re.escape(error_msg)):
             seq_mon.validate_rundir(test_dir)
@@ -788,12 +789,11 @@ class TestUpdatePlot(unittest.TestCase):
         barcode2_process2 = "Number of processed files: 3"
         report_status = "Updated plot"
         opening_file = "Opening report"
-        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
-                             "params = list(threshold = ", "10",
-                             ", maxDepth= ", "100", ", path = ",
-                             "\'" + str(self.test_outdir) + "\', samplesheet = ",
-                    "\'" + str(self.test_samplesheet) + "\', region_file = ",
-                             "\'" + "" + "\'))\""]
+        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
+        plot_cmd = ["Rscript", str(script_path), str(self.test_outdir), str(self.test_samplesheet),
+                    "10", # cutoff
+                    "100", # max depth
+                    ]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
         assert not self.test_settings.exists()
@@ -837,12 +837,11 @@ class TestUpdatePlot(unittest.TestCase):
         barcode2_process2 = "Number of processed files: 3"
         report_status = "Updated plot"
         opening_file = "Opening report"
-        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
-                    "params = list(threshold = ", "10",
-                    ", maxDepth= ", "100", ", path = ",
-                    "\'" + str(self.test_outdir) + "\', samplesheet = ",
-                    "\'" + str(self.test_samplesheet) + "\', region_file = ",
-                    "\'" + "" + "\'))\""]
+        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
+        plot_cmd = ["Rscript", str(script_path), str(self.test_outdir), str(self.test_samplesheet),
+                    "10",  # cutoff
+                    "100",  # max depth
+                    ]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
         open_cmd = "gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + str(self.test_outdir) + "\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\""
@@ -884,12 +883,11 @@ class TestUpdatePlot(unittest.TestCase):
         barcode2_process2 = "Number of processed files: 3"
         report_status = "Updated plot"
         opening_file = "Opening report"
-        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
-                    "params = list(threshold = ", "10",
-                    ", maxDepth= ", "100", ", path = ",
-                    "\'" + str(self.test_outdir) + "\', samplesheet = ",
-                    "\'" + str(self.test_samplesheet) + "\', region_file = ",
-                    "\'" + f"{self.test_ref}/test_region.bed" + "\'))\""]
+        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
+        plot_cmd = ["Rscript", str(script_path), str(self.test_outdir), str(self.test_samplesheet),
+                    "10",  # cutoff
+                    "100",  # max depth
+                    "--region_file", f"{self.test_ref}/test_region.bed"]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
         with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
@@ -981,12 +979,11 @@ class TestStartCovermon(unittest.TestCase):
                      f"Creating output directory {self.test_default_out}...",
                      "  The sequencing summary has been found. Run complete    ✓"]
         initializing_msg = "Initializing report as closed"
-        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
-                    "params = list(threshold = ", str(cover_threshold),
-                    ", maxDepth= ", str(max_depth), ", path = ",
-                    "\'" + str(self.test_default_out) + "\', samplesheet = ",
-                    "\'" + self.test_samplesheet + "\', region_file = ",
-                    "\'" + "" + "\'))\""]
+        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
+        plot_cmd = ["Rscript", str(script_path), str(self.test_default_out), str(self.test_samplesheet),
+                    str(cover_threshold),  # cutoff
+                    str(max_depth),  # max depth
+                    ]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
         browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_default_out}\" "
@@ -1021,12 +1018,11 @@ class TestStartCovermon(unittest.TestCase):
                      f"Creating output directory {self.test_default_ref_is_dir}...",
                      "  The sequencing summary has been found. Run complete    ✓"]
         initializing_msg = "Initializing report as closed"
-        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
-                    "params = list(threshold = ", str(cover_threshold),
-                    ", maxDepth= ", str(max_depth), ", path = ",
-                    "\'" + str(self.test_default_ref_is_dir) + "\', samplesheet = ",
-                    "\'" + self.test_samplesheet + "\', region_file = ",
-                    "\'" + "" + "\'))\""]
+        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
+        plot_cmd = ["Rscript", str(script_path), str(self.test_default_ref_is_dir), str(self.test_samplesheet),
+                    str(cover_threshold),  # cutoff
+                    str(max_depth),  # max depth
+                    ]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
         browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_default_ref_is_dir}\" "
@@ -1062,12 +1058,11 @@ class TestStartCovermon(unittest.TestCase):
                      f"Creating output directory {self.test_outdir}...",
                      "  The sequencing summary has been found. Run complete    ✓"]
         initializing_msg = "Initializing report as closed"
-        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
-                    "params = list(threshold = ", str(cover_threshold),
-                    ", maxDepth= ", str(max_depth), ", path = ",
-                    "\'" + str(self.test_outdir) + "\', samplesheet = ",
-                    "\'" + self.test_samplesheet + "\', region_file = ",
-                    "\'" + "" + "\'))\""]
+        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
+        plot_cmd = ["Rscript", str(script_path), str(self.test_outdir), str(self.test_samplesheet),
+                    str(cover_threshold),  # cutoff
+                    str(max_depth),  # max depth
+                    ]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
         browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_outdir}\" "
@@ -1102,12 +1097,11 @@ class TestStartCovermon(unittest.TestCase):
                      f"Creating output directory {self.test_outdir}...",
                      "  The sequencing summary has been found. Run complete    ✓"]
         initializing_msg = "Initializing report as closed"
-        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
-                    "params = list(threshold = ", str(cover_threshold),
-                    ", maxDepth= ", str(max_depth), ", path = ",
-                    "\'" + str(self.test_outdir) + "\', samplesheet = ",
-                    "\'" + self.test_samplesheet + "\', region_file = ",
-                    "\'" + f"{self.test_ref}/test_region.bed" + "\'))\""]
+        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
+        plot_cmd = ["Rscript", str(script_path), str(self.test_outdir), str(self.test_samplesheet),
+                    str(cover_threshold),  # cutoff
+                    str(max_depth),  # max depth
+                    "--region_file", f"{self.test_ref}/test_region.bed"]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
         browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_outdir}\" "
@@ -1193,12 +1187,11 @@ class TestStartCovermon(unittest.TestCase):
                      "Current settings match saved settings",
                      "  The sequencing summary has been found. Run complete    ✓"]
         initializing_msg = "Initializing report as closed"
-        plot_cmd = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',",
-                    "params = list(threshold = ", str(cover_threshold),
-                    ", maxDepth= ", str(max_depth), ", path = ",
-                    "\'" + str(self.test_out_existing) + "\', samplesheet = ",
-                    "\'" + self.test_samplesheet + "\', region_file = ",
-                    "\'" + "" + "\'))\""]
+        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
+        plot_cmd = ["Rscript", str(script_path), str(self.test_out_existing), str(self.test_samplesheet),
+                    str(cover_threshold),  # cutoff
+                    str(max_depth)  # max depth
+                    ]
         plot_msg = " ".join(plot_cmd)
         plot_call = mock.call(plot_msg, shell=True, check=True)
         browser_sync = (f"gnome-terminal --tab -- browser-sync start -w --no-notify -s \"{self.test_out_existing}\" "
