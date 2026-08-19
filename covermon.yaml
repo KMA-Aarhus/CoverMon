@@ -17,3 +17,4 @@ dependencies:
  - r-kableextra
  - r-knitr # implied by kableextra but let's be explicit
  - r-tidyverse
+ - xlrd >= 2.0.1
