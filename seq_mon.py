@@ -465,19 +465,14 @@ def update_plot(active_report: CoverReport) -> None:
             # If not, creates the first one and continues the loop without merging.
             if not bam_out.exists():
                 create_bam(unprocessed_file, out_base, bam_out, reference)
-                active_report.add_processed_file(unprocessed_file)
-                write_to_processed(str(unprocessed_file), out_base)
-                active_report.save_settings()
-
-                logger.info(f"Number of processed files: {len(active_report.processed_files)}")
             else:
                 # Maps new reads to reference
                 append_bam(unprocessed_file, out_base, bam_out, reference)
-                active_report.add_processed_file(unprocessed_file)
-                write_to_processed(str(unprocessed_file), out_base)  # TODO: replace with saving settings?
-                active_report.save_settings()
+            active_report.add_processed_file(unprocessed_file)
+            write_to_processed(str(unprocessed_file), out_base)  # TODO: replace with saving settings?
+            active_report.save_settings()
 
-                logger.info(f"Number of processed files: {len(active_report.processed_files)}")
+            logger.info(f"Number of processed files: {len(active_report.processed_files)}")
             # Index the new bam and calculate depth. Then creates the monitoring html
             get_depth(bam_out, depth)
             plot_cov_cmd3 = ["Rscript",
