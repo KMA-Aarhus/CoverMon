@@ -246,6 +246,30 @@ class TestCoverReport(unittest.TestCase):
             test_settings = json.load(settings_file)
         assert expected_results == test_settings
 
+    def test_save_and_resolve(self):
+        """Resolve paths when saving a CoverReport."""
+        settings = self.test_outdir / "settings.json"
+        assert not settings.exists()
+        test_report = seq_mon.CoverReport(self.test_dir.relative_to(pathlib.Path(__file__).parent.parent),
+                                          sample_sheet=self.test_samplesheet.relative_to(pathlib.Path(__file__).parent.parent),
+                                          threshold=10,
+                                          maxDepth=100,
+                                          reference=self.test_ref.relative_to(pathlib.Path(__file__).parent.parent),
+                                          out_base=self.test_outdir.relative_to(pathlib.Path(__file__).parent.parent))
+        to_add = ["path/to/processed.fq", "path/to/processed_2.fq"]
+        test_report.add_processed_files([pathlib.Path(processed) for processed in to_add])
+        # TODO: do we want to move the processed files to the settings?
+        expected_results = {"fastq_dir": str(self.test_dir), "sample_sheet": str(self.test_samplesheet),
+                            "threshold": 10,
+                            "maxDepth": 100, "reference": str(self.test_ref), "out_base": str(self.test_outdir),
+                            "processed_files": to_add,
+                            "region_file": None}
+        test_report.save_settings()
+        assert settings.exists()
+        with open(settings, "r", encoding="utf-8") as settings_file:
+            test_settings = json.load(settings_file)
+        assert expected_results == test_settings
+
 
 class TestLoadSettings(unittest.TestCase):
     def test_success_load(self):
