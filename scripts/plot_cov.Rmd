@@ -56,7 +56,7 @@ if (!params$region_file == "NA") {
 }
 
 
-samplesheet = read.table(params$samplesheet, header=TRUE, sep = "\t")
+samplesheet = readxl::read_excel(params$samplesheet)
 
 files = list.files(paste0(params$path,"/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
 if (!params$threshold == "NA") {
