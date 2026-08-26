@@ -139,7 +139,7 @@ class CoverReport:
         settings = copy.deepcopy(vars(self))
         path_settings = {"reference", "fastq_dir", "sample_sheet", "out_base", "region_file"}
         settings["processed_files"] = [str(processed) for processed in settings["processed_files"]]
-        settings = {key: str(value) if key in path_settings and value is not None else value
+        settings = {key: str(value.resolve()) if key in path_settings and value is not None else value
                     for key, value in settings.items()}
         settings.pop("workflow_table")
         settings.pop("is_open")  # might be incorrectly set if the run is interrupted
