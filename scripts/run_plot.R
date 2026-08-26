@@ -13,7 +13,7 @@ arg_parser <- argparser::arg_parser("Plot coverage for a given amplicon") |>
   argparser::add_argument("maxdepth", help = "Maximum depth to plot") |>
   argparser::add_argument("--region_file",
                           help = "Path to the region file to be used (optional, only for a single reference file)",
-                          default = "")
+                          default = "NA")
 
 args <- argparser::parse_args(arg_parser)
 
