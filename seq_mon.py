@@ -7,7 +7,7 @@ import argparse
 import copy
 import json
 import logging
-import os
+import multiprocessing
 import pathlib
 import random
 import subprocess
@@ -469,6 +469,21 @@ def get_r_cmd(active_report: CoverReport) -> List[str]:
         plot_cmd.extend(["--region_file", str(active_report.region_file)])
     return plot_cmd
 
+def start_watch_server(active_report: CoverReport) -> None:
+    """Start a livereload server and rerun plotting on changes to processed files
+
+    Args:
+        active_report:  the CoverReport to plot
+
+    """
+    # Create the monitoring html
+    plot_cov_cmd = get_r_cmd(active_report)
+    logger.debug(" ".join(plot_cov_cmd))
+    server = livereload.Server()
+    server.watch(active_report.out_base / "processed_files.txt", " ".join(plot_cov_cmd), delay = 60)
+    server.serve(port=active_report.port, open_url_delay=1,
+                 default_filename=active_report.out_base / "plot_cov.html")
+
 
 # TODO remember to save the files here
 def update_plot(active_report: CoverReport) -> None:
@@ -510,20 +525,15 @@ def update_plot(active_report: CoverReport) -> None:
 
             logger.info(f"Number of processed files: {len(active_report.processed_files)}")
 
-            # Now create the monitoring html if needed
-            plot_cov_cmd3 = get_r_cmd(active_report)
-            logger.debug(" ".join(plot_cov_cmd3))
-            #subprocess.run(" ".join(plot_cov_cmd3), shell=True, check = True)
             logger.info("Updated plot")  # TODO remove this, add to run_plot
             if not active_report.is_open:
                 logger.info("Opening report")
-                if os.fork():
-                    sys.exit(0)
-                active_report.set_open_status(True)
-                server = livereload.Server()
-                server.watch(out_base / "processed_files.txt", " ".join(plot_cov_cmd3))
-                server.serve(port = active_report.port, open_url_delay = 1,
-                             default_filename = out_base / "plot_cov.html")
+                active_report.set_open_status(True)  # TODO handle this with a lock instead?
+                watch_proc = multiprocessing.Process(target=start_watch_server, args=([active_report]), daemon=True)
+                watch_proc.start()
+
+# TODO initialize report from argparse
+
 
 def start_covermon(start_args) -> None:
     """Start monitoring with the supplied arguments
@@ -608,17 +618,10 @@ def start_covermon(start_args) -> None:
         # set the old report's port settings on the new one
         report.port = old_report.port
 
-        plot_cov_cmd3 = get_r_cmd(report)
-        # subprocess.run(" ".join(plot_cov_cmd3), shell=True, check = True)
         logger.info("Opening report")
-        if os.fork():
-            sys.exit(0)
         report.set_open_status(True)
-        server = livereload.Server()
-        server.watch(report.out_base / "processed_files.txt", " ".join(plot_cov_cmd3))
-        server.serve(port=report.port, open_url_delay=1,
-                     default_filename=report.out_base / "plot_cov.html")
-
+        watch_proc = multiprocessing.Process(target=start_watch_server, args=([report]), daemon=True)
+        watch_proc.start()
 
     # When sequencing, we will check for new files every 60 seconds
     seconds_wait = 60
@@ -640,6 +643,7 @@ def start_covermon(start_args) -> None:
 
 
     logger.info("  The sequencing summary has been found. Run complete    ✓")
+    # todo open the final page no matter what
 
 if __name__ == "__main__":
     start_covermon(sys.argv[1:])
