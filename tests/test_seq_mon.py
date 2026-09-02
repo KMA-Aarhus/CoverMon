@@ -944,11 +944,10 @@ class TestUpdatePlot(unittest.TestCase):
 
     # mock process, fork, server, serve, random range
     @mock.patch(f"{seq_mon.__name__}.multiprocessing.Process", autospec=True)
-    @mock.patch(f"{seq_mon.__name__}.os.fork")
     @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_success_open_window(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_process):
+    def test_success_open_window(self, mock_create_bam, mock_run, mock_srv, mock_process):
         """Successfully update the plot when the browser is not yet open; update report status"""
         # output to a consistent "port"
         port = 50542
@@ -958,7 +957,6 @@ class TestUpdatePlot(unittest.TestCase):
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_fork.return_value = False
         mock_server = mock.Mock()
         mock_srv.return_value = mock_server
         mock_multiprocess = mock.Mock()
@@ -1000,13 +998,12 @@ class TestUpdatePlot(unittest.TestCase):
         assert mock_multiprocess.return_value.daemon
         #mock_run.assert_has_calls([plot_call, open_call], any_order=True)
 
-    # mock fork, server, serve, random range
+    # mock server, serve, random range
     @mock.patch(f"{seq_mon.__name__}.multiprocessing.Process", autospec=True)
-    @mock.patch(f"{seq_mon.__name__}.os.fork")
     @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_success_single_ref(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_process):
+    def test_success_single_ref(self, mock_create_bam, mock_run, mock_srv, mock_process):
         """Update the plot when we're using a single reference and a region file"""
         # output to a consistent "port"
         port = 50542
@@ -1017,7 +1014,6 @@ class TestUpdatePlot(unittest.TestCase):
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_fork.return_value = False
         mock_server = mock.Mock()
         mock_srv.return_value = mock_server
         mock_multiprocess = mock.Mock()
