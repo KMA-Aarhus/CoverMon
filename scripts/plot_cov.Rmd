@@ -27,6 +27,11 @@ params:
 }
 </style>
 
+```{js echo = FALSE}
+setTimeout(function(){
+   window.location.reload(1);
+}, 30000);
+```
 ```{r echo=F, message=F, warning=F}
 # A function that returns a new table number for each run
 tableno_var = 0
@@ -35,6 +40,7 @@ tableno = function() {
     tableno_var
 }
 ```
+
 ```{r, include = FALSE}
 knitr::opts_chunk$set(
       echo    = FALSE
