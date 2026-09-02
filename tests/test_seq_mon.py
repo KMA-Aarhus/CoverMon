@@ -819,6 +819,49 @@ class TestGetPlotCommand(unittest.TestCase):
         test_cmd = seq_mon.get_r_cmd(test_report)
         assert test_cmd == plot_cmd
 
+class TestStartServer(unittest.TestCase):
+    test_dir = pathlib.Path(__file__).parent / "data" / "workflow_table" / "rundir" / "test_dir" / "fastq_pass"
+    test_df = pd.DataFrame(data={"sample_id": ["test1", "test2"],
+                                 "barcode": ["RB01", "RB02"],
+                                 "reference": ["nCoV-2019.reference.fa", "nCoV-2019.reference.fa"],
+                                 "ct": ["10", "20"],
+                                 "other_columns1": ["A", "B"],
+                                 "other_columns2": ["1", "2", ],
+                                 "barcode_path": [str(test_dir / "barcode01"),
+                                                  str(test_dir / "barcode02")],
+                                 "barcode_basename": ["barcode01", "barcode02"]
+                                 })
+    test_outdir = pathlib.Path(__file__).parent / "data" / "out_dir"
+    test_ref = pathlib.Path(__file__).parent / "data" / "ref_dir"
+    test_samplesheet = pathlib.Path(__file__).parent / "data" / "samplesheet.xls"
+    test_settings = test_outdir / "settings.json"
+
+    @pytest.fixture(autouse=True)
+    def inject_fixtures(self, caplog):
+        self._caplog = caplog
+
+    @mock.patch(f"{seq_mon.__name__}.livereload.Server")
+    def test_start_server(self, mock_srv):
+        """Start the livereload server from a CoverageReport."""
+        port = 50542
+        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
+                                          reference=self.test_ref, out_base=self.test_outdir, port=port)
+        mock_server = mock.Mock()
+        mock_srv.return_value = mock_server
+        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
+        plot_cmd = ["Rscript", str(script_path), str(self.test_outdir), str(self.test_samplesheet),
+                    "10",  # cutoff
+                    "100",  # max depth
+                    ]
+        plot_msg = " ".join(plot_cmd)
+        expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg, delay = 60),
+                          call().serve(port = port, open_url_delay = 1,
+                                          default_filename = self.test_outdir / "plot_cov.html")]
+        with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
+            seq_mon.start_watch_server(test_report)
+            assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
+        assert mock_srv.mock_calls == expected_calls
+
 # TODO: make this nicer
 def bam_creator(*args) -> None:
     """Create bam files for testing"""
@@ -826,7 +869,7 @@ def bam_creator(*args) -> None:
     for bam in [test_outdir / "RB01.bam", test_outdir / "RB02.bam"]:
         bam.touch()
 
-# TODO: adapt to save settings in addition to or instead of just documenting opened files
+
 class TestUpdatePlot(unittest.TestCase):
     test_dir = pathlib.Path(__file__).parent / "data" / "workflow_table" / "rundir" / "test_dir" / "fastq_pass"
     test_df = pd.DataFrame(data={"sample_id": ["test1", "test2"],
@@ -877,22 +920,14 @@ class TestUpdatePlot(unittest.TestCase):
         barcode2_process2 = "Number of processed files: 3"
         report_status = "Updated plot"
         opening_file = "Opening report"
-        script_path = pathlib.Path(__file__).parent.parent / "scripts" / "run_plot.R"
-        plot_cmd = ["Rscript", str(script_path), str(self.test_outdir), str(self.test_samplesheet),
-                    "10", # cutoff
-                    "100", # max depth
-                    ]
-        plot_msg = " ".join(plot_cmd)
-        plot_call = mock.call(plot_msg, shell=True, check=True)
         assert not self.test_settings.exists()
-        with self._caplog.at_level(logging.DEBUG, logger = "seq_mon"):
+        with self._caplog.at_level(logging.INFO, logger = "seq_mon"):
             seq_mon.update_plot(test_report)
             assert ("seq_mon", logging.INFO, scanning) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, barcode1_process1) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, barcode2_process1) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, barcode2_process2) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, report_status) in self._caplog.record_tuples
-            assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
             assert not ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
         assert test_report.is_open
         assert self.test_settings.exists()
@@ -906,14 +941,14 @@ class TestUpdatePlot(unittest.TestCase):
             processed_from_file = f.read().splitlines()
         assert sorted([str(processed) for processed in expected_processed]) == sorted(processed_from_file)
         assert found_settings == test_report
-        mock_run.assert_has_calls([plot_call], any_order=True)
 
-    # mock fork, server, serve, random range
+    # mock process, fork, server, serve, random range
+    @mock.patch(f"{seq_mon.__name__}.multiprocessing.Process", autospec=True)
     @mock.patch(f"{seq_mon.__name__}.os.fork")
     @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_success_open_window(self, mock_create_bam, mock_run, mock_srv, mock_fork):
+    def test_success_open_window(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_process):
         """Successfully update the plot when the browser is not yet open; update report status"""
         # output to a consistent "port"
         port = 50542
@@ -926,6 +961,8 @@ class TestUpdatePlot(unittest.TestCase):
         mock_fork.return_value = False
         mock_server = mock.Mock()
         mock_srv.return_value = mock_server
+        mock_multiprocess = mock.Mock()
+        mock_process.return_value = mock_multiprocess
         scanning = "Scanning for new fastq files..."
         barcode1_process1 = "Number of processed files: 1"
         barcode2_process1 = "Number of processed files: 2"
@@ -946,7 +983,7 @@ class TestUpdatePlot(unittest.TestCase):
             assert ("seq_mon", logging.INFO, barcode2_process1) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, barcode2_process2) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, report_status) in self._caplog.record_tuples
-            assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
+            #assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
         assert test_report.is_open
         assert self.test_settings.exists()
@@ -954,18 +991,22 @@ class TestUpdatePlot(unittest.TestCase):
                               self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
                               self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
-        expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg),
-                          call().serve(port = port, open_url_delay = 1,
-                                          default_filename = self.test_outdir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
+        #expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg, delay = 60),
+        #                  call().serve(port = port, open_url_delay = 1,
+        #                                  default_filename = self.test_outdir / "plot_cov.html")]
+        #assert mock_srv.mock_calls == expected_calls
+        expected_multiprocess_call = [call.start()]
+        assert mock_multiprocess.mock_calls == expected_multiprocess_call
+        assert mock_multiprocess.return_value.daemon
         #mock_run.assert_has_calls([plot_call, open_call], any_order=True)
 
     # mock fork, server, serve, random range
+    @mock.patch(f"{seq_mon.__name__}.multiprocessing.Process", autospec=True)
     @mock.patch(f"{seq_mon.__name__}.os.fork")
     @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_success_single_ref(self, mock_create_bam, mock_run, mock_srv, mock_fork):
+    def test_success_single_ref(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_process):
         """Update the plot when we're using a single reference and a region file"""
         # output to a consistent "port"
         port = 50542
@@ -979,6 +1020,8 @@ class TestUpdatePlot(unittest.TestCase):
         mock_fork.return_value = False
         mock_server = mock.Mock()
         mock_srv.return_value = mock_server
+        mock_multiprocess = mock.Mock()
+        mock_process.return_value = mock_multiprocess
         scanning = "Scanning for new fastq files..."
         barcode1_process1 = "Number of processed files: 1"
         barcode2_process1 = "Number of processed files: 2"
@@ -999,7 +1042,7 @@ class TestUpdatePlot(unittest.TestCase):
             assert ("seq_mon", logging.INFO, barcode2_process1) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, barcode2_process2) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, report_status) in self._caplog.record_tuples
-            assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
+            #assert ("seq_mon", logging.DEBUG, plot_msg) in self._caplog.record_tuples
             assert ("seq_mon", logging.INFO, opening_file) in self._caplog.record_tuples
         assert test_report.is_open
         expected_processed = [self.test_dir / "barcode01" / "barcode01-0.fastq.gz",
@@ -1007,10 +1050,13 @@ class TestUpdatePlot(unittest.TestCase):
                               self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
         #mock_run.assert_has_calls([plot_call])
-        expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_outdir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
+        #expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg, delay = 60),
+        #                  call().serve(port=port, open_url_delay=1,
+        #                               default_filename=self.test_outdir / "plot_cov.html")]
+        #assert mock_srv.mock_calls == expected_calls
+        expected_multiprocess_call = [call.start()]
+        assert mock_multiprocess.return_value.daemon
+        assert mock_multiprocess.mock_calls == expected_multiprocess_call
 
 class TestStartCovermon(unittest.TestCase):
     test_indir = pathlib.Path(__file__).parent / "data"  / "workflow_table" / "rundir"
@@ -1067,12 +1113,13 @@ class TestStartCovermon(unittest.TestCase):
         self._caplog = caplog
 
     # TODO waiting/timeout tests?
+    @mock.patch(f"{seq_mon.__name__}.multiprocessing.Process", autospec=True)
     @mock.patch(f"{seq_mon.__name__}.random.randrange")
     @mock.patch(f"{seq_mon.__name__}.os.fork")
     @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_default_one_ref(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand):
+    def test_default_one_ref(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand, mock_process):
         """Output to the default output directory when using a single reference."""
         port = 50542
         mock_subprocess = mock.Mock()
@@ -1082,7 +1129,8 @@ class TestStartCovermon(unittest.TestCase):
         mock_server = mock.Mock()
         mock_srv.return_value = mock_server
         mock_rand.return_value = port
-
+        mock_multiprocess = mock.Mock()
+        mock_process.return_value = mock_multiprocess
         cover_threshold = "100"
         max_depth = "1000"
         info_msgs = ["Backing up the original sample sheet...",
@@ -1109,17 +1157,21 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_default_out.exists()
         assert (self.test_default_out / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_default_out / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_default_out / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
+        # expected_calls = [call(), call().watch(self.test_default_out / "processed_files.txt", plot_msg, delay = 60),
+        #                   call().serve(port=port, open_url_delay=1,
+        #                                default_filename=self.test_default_out / "plot_cov.html")]
+        # assert mock_srv.mock_calls == expected_calls
+        expected_multiprocess_call = [call.start()]
+        assert mock_multiprocess.return_value.daemon
+        assert mock_multiprocess.mock_calls == expected_multiprocess_call
 
+    @mock.patch(f"{seq_mon.__name__}.multiprocessing.Process", autospec=True)
     @mock.patch(f"{seq_mon.__name__}.random.randrange")
     @mock.patch(f"{seq_mon.__name__}.os.fork")
     @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_default_refdir(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand):
+    def test_default_refdir(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand, mock_process):
         """Output to the default output directory when using a reference directory."""
         port = 50542
         mock_subprocess = mock.Mock()
@@ -1129,6 +1181,8 @@ class TestStartCovermon(unittest.TestCase):
         mock_server = mock.Mock()
         mock_srv.return_value = mock_server
         mock_rand.return_value = port
+        mock_multiprocess = mock.Mock()
+        mock_process.return_value = mock_multiprocess
 
         cover_threshold = "100"
         max_depth = "1000"
@@ -1156,17 +1210,22 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_default_ref_is_dir.exists()
         assert (self.test_default_ref_is_dir / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_default_ref_is_dir / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_default_ref_is_dir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
+        # expected_calls = [call(),
+        #                   call().watch(self.test_default_ref_is_dir / "processed_files.txt", plot_msg, delay = 60),
+        #                   call().serve(port=port, open_url_delay=1,
+        #                                default_filename=self.test_default_ref_is_dir / "plot_cov.html")]
+        # assert mock_srv.mock_calls == expected_calls
+        expected_multiprocess_call = [call.start()]
+        assert mock_multiprocess.return_value.daemon
+        assert mock_multiprocess.mock_calls == expected_multiprocess_call
 
+    @mock.patch(f"{seq_mon.__name__}.multiprocessing.Process", autospec=True)
     @mock.patch(f"{seq_mon.__name__}.random.randrange")
     @mock.patch(f"{seq_mon.__name__}.os.fork")
     @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_custom_output(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand):
+    def test_custom_output(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand, mock_process):
         """Output to a user-specified output directory."""
         port = 50542
         mock_subprocess = mock.Mock()
@@ -1176,6 +1235,8 @@ class TestStartCovermon(unittest.TestCase):
         mock_server = mock.Mock()
         mock_srv.return_value = mock_server
         mock_rand.return_value = port
+        mock_multiprocess = mock.Mock()
+        mock_process.return_value = mock_multiprocess
 
         cover_threshold = "100"
         max_depth = "1000"
@@ -1202,17 +1263,21 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_outdir.exists()
         assert (self.test_outdir / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_outdir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
+        # expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg, delay = 60),
+        #                   call().serve(port=port, open_url_delay=1,
+        #                                default_filename=self.test_outdir / "plot_cov.html")]
+        # assert mock_srv.mock_calls == expected_calls
+        expected_multiprocess_call = [call.start()]
+        assert mock_multiprocess.return_value.daemon
+        assert mock_multiprocess.mock_calls == expected_multiprocess_call
 
+    @mock.patch(f"{seq_mon.__name__}.multiprocessing.Process", autospec=True)
     @mock.patch(f"{seq_mon.__name__}.random.randrange")
     @mock.patch(f"{seq_mon.__name__}.os.fork")
     @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_region_file(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand):
+    def test_region_file(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand, mock_process):
         """Use a region file."""
         port = 50542
         mock_subprocess = mock.Mock()
@@ -1222,6 +1287,8 @@ class TestStartCovermon(unittest.TestCase):
         mock_server = mock.Mock()
         mock_srv.return_value = mock_server
         mock_rand.return_value = port
+        mock_multiprocess = mock.Mock()
+        mock_process.return_value = mock_multiprocess
 
         cover_threshold = "100"
         max_depth = "1000"
@@ -1249,10 +1316,13 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_outdir.exists()
         assert (self.test_outdir / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_outdir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
+        # expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg, delay = 60),
+        #                   call().serve(port=port, open_url_delay=1,
+        #                                default_filename=self.test_outdir / "plot_cov.html")]
+        # assert mock_srv.mock_calls == expected_calls
+        expected_multiprocess_call = [call.start()]
+        assert mock_multiprocess.return_value.daemon
+        assert mock_multiprocess.mock_calls == expected_multiprocess_call
 
     @mock.patch(f"{seq_mon.__name__}.random.randrange")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
@@ -1307,12 +1377,13 @@ class TestStartCovermon(unittest.TestCase):
             print(error_msg)
             seq_mon.start_covermon(start_args)
 
+    @mock.patch(f"{seq_mon.__name__}.multiprocessing.Process", autospec=True)
     @mock.patch(f"{seq_mon.__name__}.random.randrange")
     @mock.patch(f"{seq_mon.__name__}.os.fork")
     @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_existing_processed(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand):
+    def test_existing_processed(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand, mock_process):
         """Output to a directory already containing processed files."""
         # we don't want to accidentally hit our target port while randomly generating the port
         port = 50500
@@ -1324,6 +1395,8 @@ class TestStartCovermon(unittest.TestCase):
         mock_server = mock.Mock()
         mock_srv.return_value = mock_server
         mock_rand.return_value = port
+        mock_multiprocess = mock.Mock()
+        mock_process.return_value = mock_multiprocess
 
         cover_threshold = "100"
         max_depth = "1000"
@@ -1352,7 +1425,10 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_out_existing.exists()
         assert (self.test_out_existing / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_out_existing / "processed_files.txt", plot_msg),
-                          call().serve(port=target_port, open_url_delay=1,
-                                       default_filename=self.test_out_existing / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
+        # expected_calls = [call(), call().watch(self.test_out_existing / "processed_files.txt", plot_msg, delay = 60),
+        #                   call().serve(port=target_port, open_url_delay=1,
+        #                                default_filename=self.test_out_existing / "plot_cov.html")]
+        # assert mock_srv.mock_calls == expected_calls
+        expected_multiprocess_call = [call.start()]
+        assert mock_multiprocess.return_value.daemon
+        assert mock_multiprocess.mock_calls == expected_multiprocess_call
