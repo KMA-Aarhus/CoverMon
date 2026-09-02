@@ -13,6 +13,7 @@ import random
 import subprocess
 import sys
 import time
+import webbrowser
 
 from typing import Optional, List
 
@@ -643,7 +644,8 @@ def start_covermon(start_args) -> None:
 
 
     logger.info("  The sequencing summary has been found. Run complete    ✓")
-    # todo open the final page no matter what
+    # as the live coverage won't be available anymore when the script closes we now open the file
+    webbrowser.open_new_tab(f"file://{report.out_base / 'plot_cov.html'}")
 
 if __name__ == "__main__":
     start_covermon(sys.argv[1:])
