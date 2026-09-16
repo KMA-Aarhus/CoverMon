@@ -9,7 +9,6 @@ from collections import namedtuple
 from unittest import mock
 from unittest.mock import call
 
-import livereload
 import numpy as np
 import pandas as pd
 import pytest
@@ -69,25 +68,7 @@ class TestCoverReport(unittest.TestCase):
         assert len(test_report.processed_files) == 0
         assert not test_report.is_open
         assert self.test_samplesheet == test_report.sample_sheet
-        assert 50500 <= test_report.port <= 51000
 
-        test_one_ref = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
-                                           maxDepth=100, reference=pathlib.Path(self.test_ref) / "test_ref.fa")
-        assert self.test_dir.parent / "CoverMon_test_ref" == test_one_ref.out_base
-
-    def test_set_port(self):
-        """Set the port the report will be served on."""
-        test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
-                                          reference=self.test_ref, port = 9000)
-        pd.testing.assert_frame_equal(test_report.workflow_table, self.test_df, check_dtype=False)
-        assert 10 == test_report.threshold
-        assert 100 == test_report.maxDepth
-        assert self.test_dir.parent / "CoverMon" == test_report.out_base
-        assert self.test_ref == test_report.reference
-        assert len(test_report.processed_files) == 0
-        assert not test_report.is_open
-        assert self.test_samplesheet == test_report.sample_sheet
-        assert test_report.port == 9000
         test_one_ref = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                            maxDepth=100, reference=pathlib.Path(self.test_ref) / "test_ref.fa")
         assert self.test_dir.parent / "CoverMon_test_ref" == test_one_ref.out_base
@@ -212,15 +193,12 @@ class TestCoverReport(unittest.TestCase):
                                  reference=self.test_ref, out_base=self.test_outdir, is_open=False, processed_files=[])
         assert test_tuple != test_report
 
-    @mock.patch(f"{seq_mon.__name__}.random.randrange")
-    def test_repr(self, mock_rand):
+    def test_repr(self):
         """Print the CoverReport."""
-        port = 50542
-        mock_rand.return_value = port
         expected_str = (f"CoverReport(fastq_dir={str(self.test_dir)}, sample_sheet={self.test_samplesheet}, "
                         "threshold=10, maxDepth=100,"
                         f" reference={self.test_ref}, region_file=None,"
-                        f" out_base={self.test_outdir}, processed_files=[], is_open=False, port={port})\n"
+                        f" out_base={self.test_outdir}, processed_files=[], is_open=False)\n"
                         f"Workflow table:\n{self.test_df.to_string()}")
         test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
                                           reference=self.test_ref, out_base=self.test_outdir)
@@ -230,8 +208,8 @@ class TestCoverReport(unittest.TestCase):
                               "threshold=10, maxDepth=100,"
                               f" reference={self.test_ref}, region_file=None,"
                               f" out_base={self.test_outdir}, "
-                              "processed_files=['path/to/processed_1.fq', 'path/to/processed_2.fq'], is_open=False, "
-                              f"port={port})\n"
+                              "processed_files=['path/to/processed_1.fq', 'path/to/processed_2.fq'], is_open=False"
+                              ")\n"
                               f"Workflow table:\n{self.test_df.to_string()}")
         test_report.add_processed_file(pathlib.Path("path/to/processed_1.fq"))
         test_report.add_processed_file(pathlib.Path("path/to/processed_2.fq"))
@@ -242,8 +220,8 @@ class TestCoverReport(unittest.TestCase):
         expected_region = (f"CoverReport(fastq_dir={str(self.test_dir)}, sample_sheet={self.test_samplesheet},"
                            " threshold=10, maxDepth=100,"
                             f" reference={test_ref}, region_file={test_region},"
-                        f" out_base={self.test_outdir}, processed_files=[], is_open=False, "
-                           f"port={port})\n"
+                        f" out_base={self.test_outdir}, processed_files=[], is_open=False"
+                           ")\n"
                         f"Workflow table:\n{self.test_df.head().to_string()}")
         region_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10,
                                             maxDepth=100, reference=test_ref, out_base=self.test_outdir,
@@ -251,11 +229,8 @@ class TestCoverReport(unittest.TestCase):
         region_str = region_report.__repr__()
         assert expected_region == region_str
 
-    @mock.patch(f"{seq_mon.__name__}.random.randrange")
-    def test_save_settings(self, mock_rand):
+    def test_save_settings(self):
         """Save the settings of a CoverReport in order to be able to resume."""
-        port = 50542
-        mock_rand.return_value = port
         settings = self.test_outdir / "settings.json"
         assert not settings.exists()
         test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
@@ -266,18 +241,15 @@ class TestCoverReport(unittest.TestCase):
         expected_results = {"fastq_dir": str(self.test_dir), "sample_sheet": str(self.test_samplesheet), "threshold": 10,
                             "maxDepth": 100, "reference": str(self.test_ref), "out_base": str(self.test_outdir),
                             "processed_files": to_add,
-                            "region_file": None, "port": port}
+                            "region_file": None}
         test_report.save_settings()
         assert settings.exists()
         with open(settings, "r", encoding = "utf-8") as settings_file:
             test_settings = json.load(settings_file)
         assert expected_results == test_settings
 
-    @mock.patch(f"{seq_mon.__name__}.random.randrange")
-    def test_save_and_resolve(self, mock_rand):
+    def test_save_and_resolve(self):
         """Resolve paths when saving a CoverReport."""
-        port = 50542
-        mock_rand.return_value = port
         settings = self.test_outdir / "settings.json"
         assert not settings.exists()
         test_report = seq_mon.CoverReport(self.test_dir.relative_to(pathlib.Path(__file__).parent.parent),
@@ -292,7 +264,7 @@ class TestCoverReport(unittest.TestCase):
                             "threshold": 10,
                             "maxDepth": 100, "reference": str(self.test_ref), "out_base": str(self.test_outdir),
                             "processed_files": to_add,
-                            "region_file": None, "port": port}
+                            "region_file": None}
         test_report.save_settings()
         assert settings.exists()
         with open(settings, "r", encoding="utf-8") as settings_file:
@@ -814,8 +786,8 @@ class TestGetPlotCommand(unittest.TestCase):
                     "100",  # max depth
                     "--region_file", f"{self.test_ref}/test_region.bed"]
         test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
-                                          reference = self.test_ref / "test_ref.fa",
-                                          region_file = self.test_ref / "test_region.bed", out_base=self.test_outdir)
+                                          reference=self.test_ref / "test_ref.fa", out_base=self.test_outdir,
+                                          region_file=self.test_ref / "test_region.bed")
         test_cmd = seq_mon.get_r_cmd(test_report)
         assert test_cmd == plot_cmd
 
@@ -908,24 +880,19 @@ class TestUpdatePlot(unittest.TestCase):
         assert found_settings == test_report
         mock_run.assert_has_calls([plot_call], any_order=True)
 
-    # mock fork, server, serve, random range
-    @mock.patch(f"{seq_mon.__name__}.os.fork")
-    @mock.patch(f"{seq_mon.__name__}.livereload.Server")
+    @mock.patch(f"{seq_mon.__name__}.webbrowser.open_new_tab")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_success_open_window(self, mock_create_bam, mock_run, mock_srv, mock_fork):
+    def test_success_open_window(self, mock_create_bam, mock_run, mock_open):
         """Successfully update the plot when the browser is not yet open; update report status"""
         # output to a consistent "port"
         port = 50542
         test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
-                                          reference=self.test_ref, out_base=self.test_outdir, port = port)
+                                          reference=self.test_ref, out_base=self.test_outdir)
         assert not test_report.is_open
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_fork.return_value = False
-        mock_server = mock.Mock()
-        mock_srv.return_value = mock_server
         scanning = "Scanning for new fastq files..."
         barcode1_process1 = "Number of processed files: 1"
         barcode2_process1 = "Number of processed files: 2"
@@ -938,6 +905,7 @@ class TestUpdatePlot(unittest.TestCase):
                     "100",  # max depth
                     ]
         plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
         assert not self.test_settings.exists()
         with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
             seq_mon.update_plot(test_report)
@@ -954,31 +922,23 @@ class TestUpdatePlot(unittest.TestCase):
                               self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
                               self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
-        expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg),
-                          call().serve(port = port, open_url_delay = 1,
-                                          default_filename = self.test_outdir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
-        #mock_run.assert_has_calls([plot_call, open_call], any_order=True)
+        mock_run.assert_has_calls([plot_call], any_order=True)
+        mock_open.assert_called_with(f"file://{self.test_outdir / 'plot_cov.html'}")
 
-    # mock fork, server, serve, random range
-    @mock.patch(f"{seq_mon.__name__}.os.fork")
-    @mock.patch(f"{seq_mon.__name__}.livereload.Server")
+    @mock.patch(f"{seq_mon.__name__}.webbrowser.open_new_tab")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_success_single_ref(self, mock_create_bam, mock_run, mock_srv, mock_fork):
+    def test_success_single_ref(self, mock_create_bam, mock_run, mock_open):
         """Update the plot when we're using a single reference and a region file"""
         # output to a consistent "port"
         port = 50542
         test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
                                           reference=self.test_ref / "test_ref.fa", out_base=self.test_outdir,
-                                          region_file=self.test_ref / "test_region.bed", port = port)
+                                          region_file=self.test_ref / "test_region.bed")
         assert not test_report.is_open
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_fork.return_value = False
-        mock_server = mock.Mock()
-        mock_srv.return_value = mock_server
         scanning = "Scanning for new fastq files..."
         barcode1_process1 = "Number of processed files: 1"
         barcode2_process1 = "Number of processed files: 2"
@@ -991,7 +951,7 @@ class TestUpdatePlot(unittest.TestCase):
                     "100",  # max depth
                     "--region_file", f"{self.test_ref}/test_region.bed"]
         plot_msg = " ".join(plot_cmd)
-        #plot_call = mock.call(plot_msg, shell=True, check=True)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
         with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
             seq_mon.update_plot(test_report)
             assert ("seq_mon", logging.INFO, scanning) in self._caplog.record_tuples
@@ -1006,11 +966,9 @@ class TestUpdatePlot(unittest.TestCase):
                               self.test_dir / "barcode02" / "barcode02_0.fastq.gz",
                               self.test_dir / "barcode02" / "barcode02_1.fastq.gz"]
         assert sorted(expected_processed) == sorted(test_report.processed_files)
-        #mock_run.assert_has_calls([plot_call])
-        expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_outdir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
+        mock_run.assert_has_calls([plot_call])
+        mock_open.assert_called_with(f"file://{self.test_outdir / 'plot_cov.html'}")
+
 
 class TestStartCovermon(unittest.TestCase):
     test_indir = pathlib.Path(__file__).parent / "data"  / "workflow_table" / "rundir"
@@ -1053,8 +1011,7 @@ class TestStartCovermon(unittest.TestCase):
   "threshold": 100,
   "maxDepth": 1000,
   "region_file": "None",
-  "processed_files": ["tests/data/workflow_table/rundir/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz"],
-  "port": 50542
+  "processed_files": ["tests/data/workflow_table/rundir/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz"]
 }"""
             f.write(settings)
         dirs_to_clean = [self.test_default_out, self.test_default_ref_is_dir]
@@ -1068,23 +1025,15 @@ class TestStartCovermon(unittest.TestCase):
 
     # TODO waiting/timeout tests?
     @mock.patch(f"{seq_mon.__name__}.webbrowser.open_new_tab")
-    @mock.patch(f"{seq_mon.__name__}.random.randrange")
-    @mock.patch(f"{seq_mon.__name__}.os.fork")
-    @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_default_one_ref(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand,
+    def test_default_one_ref(self, mock_create_bam, mock_run,
                              mock_open):
         """Output to the default output directory when using a single reference."""
         port = 50542
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_fork.return_value = False
-        mock_server = mock.Mock()
-        mock_srv.return_value = mock_server
-        mock_rand.return_value = port
-
         cover_threshold = "100"
         max_depth = "1000"
         info_msgs = ["Backing up the original sample sheet...",
@@ -1101,6 +1050,7 @@ class TestStartCovermon(unittest.TestCase):
                     str(max_depth),  # max depth
                     ]
         plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
         start_args = [self.test_samplesheet, str(self.test_indir), f"{self.test_ref}/test_ref.fa", cover_threshold,
                       max_depth]
         assert not self.test_default_out.exists()
@@ -1111,30 +1061,19 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_default_out.exists()
         assert (self.test_default_out / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_default_out / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_default_out / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
+        mock_run.assert_has_calls([plot_call])
         mock_open.assert_called_with(f"file://{self.test_default_out / 'plot_cov.html'}")
 
 
     @mock.patch(f"{seq_mon.__name__}.webbrowser.open_new_tab")
-    @mock.patch(f"{seq_mon.__name__}.random.randrange")
-    @mock.patch(f"{seq_mon.__name__}.os.fork")
-    @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_default_refdir(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand, mock_open):
+    def test_default_refdir(self, mock_create_bam, mock_run, mock_open):
         """Output to the default output directory when using a reference directory."""
         port = 50542
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_fork.return_value = False
-        mock_server = mock.Mock()
-        mock_srv.return_value = mock_server
-        mock_rand.return_value = port
-
         cover_threshold = "100"
         max_depth = "1000"
         info_msgs = ["Backing up the original sample sheet...",
@@ -1151,6 +1090,7 @@ class TestStartCovermon(unittest.TestCase):
                     str(max_depth),  # max depth
                     ]
         plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
         start_args = [self.test_samplesheet, str(self.test_indir), self.test_ref, cover_threshold,
                       max_depth]
         assert not self.test_default_ref_is_dir.exists()
@@ -1161,30 +1101,19 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_default_ref_is_dir.exists()
         assert (self.test_default_ref_is_dir / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_default_ref_is_dir / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_default_ref_is_dir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
         mock_open.assert_called_with(f"file://{self.test_default_ref_is_dir / 'plot_cov.html'}")
+        mock_run.assert_has_calls([plot_call])
 
 
     @mock.patch(f"{seq_mon.__name__}.webbrowser.open_new_tab")
-    @mock.patch(f"{seq_mon.__name__}.random.randrange")
-    @mock.patch(f"{seq_mon.__name__}.os.fork")
-    @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_custom_output(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand, mock_open):
+    def test_custom_output(self, mock_create_bam, mock_run, mock_open):
         """Output to a user-specified output directory."""
         port = 50542
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_fork.return_value = False
-        mock_server = mock.Mock()
-        mock_srv.return_value = mock_server
-        mock_rand.return_value = port
-
         cover_threshold = "100"
         max_depth = "1000"
         info_msgs = ["Backing up the original sample sheet...",
@@ -1201,6 +1130,7 @@ class TestStartCovermon(unittest.TestCase):
                     str(max_depth),  # max depth
                     ]
         plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
         start_args = [self.test_samplesheet, str(self.test_indir), self.test_ref, cover_threshold,
                       max_depth, "--outdir", str(self.test_outdir)]
         with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
@@ -1210,30 +1140,20 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_outdir.exists()
         assert (self.test_outdir / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_outdir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
         mock_open.assert_called_with(f"file://{self.test_outdir / 'plot_cov.html'}")
+        mock_run.assert_has_calls([plot_call])
+
 
 
     @mock.patch(f"{seq_mon.__name__}.webbrowser.open_new_tab")
-    @mock.patch(f"{seq_mon.__name__}.random.randrange")
-    @mock.patch(f"{seq_mon.__name__}.os.fork")
-    @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_region_file(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand, mock_open):
+    def test_region_file(self, mock_create_bam, mock_run, mock_open):
         """Use a region file."""
         port = 50542
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_fork.return_value = False
-        mock_server = mock.Mock()
-        mock_srv.return_value = mock_server
-        mock_rand.return_value = port
-
         cover_threshold = "100"
         max_depth = "1000"
         info_msgs = ["Backing up the original sample sheet...",
@@ -1251,6 +1171,8 @@ class TestStartCovermon(unittest.TestCase):
                     str(max_depth),  # max depth
                     "--region_file", f"{self.test_ref}/test_region.bed"]
         plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
+
         start_args = [self.test_samplesheet, str(self.test_indir), f"{self.test_ref}/test_ref.fa", cover_threshold,
                       max_depth, "--outdir", str(self.test_outdir), "--region_file", f"{self.test_ref}/test_region.bed"]
         with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
@@ -1260,12 +1182,8 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_outdir.exists()
         assert (self.test_outdir / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_outdir / "processed_files.txt", plot_msg),
-                          call().serve(port=port, open_url_delay=1,
-                                       default_filename=self.test_outdir / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
         mock_open.assert_called_with(f"file://{self.test_outdir / 'plot_cov.html'}")
-
+        mock_run.assert_has_calls([plot_call])
 
     @mock.patch(f"{seq_mon.__name__}.random.randrange")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
@@ -1303,8 +1221,7 @@ class TestStartCovermon(unittest.TestCase):
                      f" reference={self.test_ref}, region_file=None,"
                      f" out_base={self.test_out_existing}, "
                      f"processed_files=['{self.test_indir}/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz'],"
-                     " is_open=False,"
-                     " port=50542)\n"
+                     " is_open=False)\n"
                      f"Workflow table:\n{sheet.head().to_string()}\n"
                      f"New settings:\n"
                      f"CoverReport(fastq_dir={str(self.test_indir / 'test_dir' / 'fastq_pass')},"
@@ -1313,20 +1230,16 @@ class TestStartCovermon(unittest.TestCase):
                      f" reference={self.test_ref}/test_ref.fa, region_file=None,"
                      f" out_base={self.test_out_existing}, "
                      f"processed_files=['{self.test_indir}/test_dir/fastq_pass/barcode01/barcode01-0.fastq.gz'],"
-                     " is_open=False,"
-                     " port=50500)\n"
+                     " is_open=False)\n"
                      f"Workflow table:\n{sheet.head().to_string()}")
         with pytest.raises(ValueError, match=re.escape(error_msg)):
             print(error_msg)
             seq_mon.start_covermon(start_args)
 
     @mock.patch(f"{seq_mon.__name__}.webbrowser.open_new_tab")
-    @mock.patch(f"{seq_mon.__name__}.random.randrange")
-    @mock.patch(f"{seq_mon.__name__}.os.fork")
-    @mock.patch(f"{seq_mon.__name__}.livereload.Server")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_existing_processed(self, mock_create_bam, mock_run, mock_srv, mock_fork, mock_rand, mock_open):
+    def test_existing_processed(self, mock_create_bam, mock_run, mock_open):
         """Output to a directory already containing processed files."""
         # we don't want to accidentally hit our target port while randomly generating the port
         port = 50500
@@ -1334,11 +1247,6 @@ class TestStartCovermon(unittest.TestCase):
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_fork.return_value = False
-        mock_server = mock.Mock()
-        mock_srv.return_value = mock_server
-        mock_rand.return_value = port
-
         cover_threshold = "100"
         max_depth = "1000"
         info_msgs = ["Backing up the original sample sheet...",
@@ -1357,6 +1265,7 @@ class TestStartCovermon(unittest.TestCase):
                     str(max_depth)  # max depth
                     ]
         plot_msg = " ".join(plot_cmd)
+        plot_call = mock.call(plot_msg, shell=True, check=True)
         start_args = [self.test_samplesheet, str(self.test_indir), self.test_ref, cover_threshold,
                       max_depth, "--outdir", str(self.test_out_existing)]
         with self._caplog.at_level(logging.DEBUG, logger="seq_mon"):
@@ -1366,8 +1275,5 @@ class TestStartCovermon(unittest.TestCase):
             assert ("seq_mon", logging.DEBUG, initializing_msg) in self._caplog.record_tuples
         assert self.test_out_existing.exists()
         assert (self.test_out_existing / "sample_sheet_given.tsv").exists()
-        expected_calls = [call(), call().watch(self.test_out_existing / "processed_files.txt", plot_msg),
-                          call().serve(port=target_port, open_url_delay=1,
-                                       default_filename=self.test_out_existing / "plot_cov.html")]
-        assert mock_srv.mock_calls == expected_calls
         mock_open.assert_called_with(f"file://{self.test_out_existing / 'plot_cov.html'}")
+        mock_run.assert_has_calls([plot_call])

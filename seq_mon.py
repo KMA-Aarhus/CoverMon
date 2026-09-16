@@ -7,9 +7,7 @@ import argparse
 import copy
 import json
 import logging
-import os
 import pathlib
-import random
 import subprocess
 import sys
 import time
@@ -17,7 +15,6 @@ import webbrowser
 
 from typing import Optional, List
 
-import livereload
 import pandas as pd
 import numpy as np
 
@@ -47,12 +44,11 @@ class CoverReport:
     """
     def __init__(self, indir: pathlib.Path, sample_sheet: pathlib.Path, threshold: int, maxDepth: int,
                  reference: pathlib.Path, out_base: Optional[pathlib.Path] = None,
-                 region_file: Optional[pathlib.Path] = None, port: Optional[int] = None) \
+                 region_file: Optional[pathlib.Path] = None) \
             -> None:
         """Initialize a CoverReport object.
 
         Args:
-            port:
             indir:          the directory containing sequencing data
             sample_sheet:   path to sample sheet
             threshold:      minimum coverage required
@@ -61,8 +57,6 @@ class CoverReport:
             out_base:       output base directory (optional)
             region_file:    path to bed file with regions in the reference
                             (optional, only allowed if reference is a single file)
-            port:           the port where to serve the report html
-                            (optional; if not given a random port between 50500 and 51000 will be assigned)
 
 
         Raises:
@@ -95,11 +89,6 @@ class CoverReport:
         self.is_open = False  # TODO: can we assume this?
         self.processed_files: List[pathlib.Path] = []
         self.region_file = region_file
-        # set a port for output
-        if port is not None:
-            self.port = port
-        else:
-            self.port = random.randrange(50500, 51000)
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, CoverReport):
@@ -120,8 +109,7 @@ class CoverReport:
                f"threshold={self.threshold}, maxDepth={self.maxDepth},"
                f" reference={self.reference}, region_file={self.region_file},"
                f" out_base={self.out_base}, processed_files={[str(processed) for processed in self.processed_files]},"
-               f" is_open={self.is_open},"
-               f" port={self.port})\n"
+               f" is_open={self.is_open})\n"
                f"Workflow table:\n{self.workflow_table.head().to_string()}")
 
     def set_open_status(self, open_status: bool) -> None:
@@ -515,17 +503,13 @@ def update_plot(active_report: CoverReport) -> None:
             plot_cov_cmd3 = get_r_cmd(active_report)
             logger.debug(" ".join(plot_cov_cmd3))
             subprocess.run(" ".join(plot_cov_cmd3), shell=True, check = True)
-            logger.info("Updated plot")  # TODO remove this, add to run_plot
+            logger.info("Updated plot")
             if not active_report.is_open:
                 logger.info("Opening report")
-                if os.fork():
-                    sys.exit(0)
                 active_report.set_open_status(True)
-                server = livereload.Server()
-                server.watch(out_base / "processed_files.txt", " ".join(plot_cov_cmd3))
-                server.serve(port = active_report.port, open_url_delay = 1,
-                             default_filename = out_base / "plot_cov.html")
+                webbrowser.open_new_tab(f"file://{active_report.out_base / 'plot_cov.html'}")
 
+# TODO break this up into separate functions
 def start_covermon(start_args) -> None:
     """Start monitoring with the supplied arguments
 
@@ -606,20 +590,11 @@ def start_covermon(start_args) -> None:
                              f"{report}")
             raise ValueError(error_msg)
         logger.info("Current settings match saved settings")
-        # set the old report's port settings on the new one
-        report.port = old_report.port
-
         plot_cov_cmd3 = get_r_cmd(report)
-        # subprocess.run(" ".join(plot_cov_cmd3), shell=True, check = True)
+        subprocess.run(" ".join(plot_cov_cmd3), shell=True, check = True)
         logger.info("Opening report")
-        if os.fork():
-            sys.exit(0)
         report.set_open_status(True)
-        server = livereload.Server()
-        server.watch(report.out_base / "processed_files.txt", " ".join(plot_cov_cmd3))
-        server.serve(port=report.port, open_url_delay=1,
-                     default_filename=report.out_base / "plot_cov.html")
-
+        webbrowser.open_new_tab(f"file://{report.out_base / 'plot_cov.html'}")
 
     # When sequencing, we will check for new files every 60 seconds
     seconds_wait = 60
@@ -641,7 +616,7 @@ def start_covermon(start_args) -> None:
 
 
     logger.info("  The sequencing summary has been found. Run complete    ✓")
-    # as the live coverage won't be available anymore when the script closes we now open the file
+    # TODO do we need this
     webbrowser.open_new_tab(f"file://{report.out_base / 'plot_cov.html'}")
 
 if __name__ == "__main__":
