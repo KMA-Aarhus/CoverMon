@@ -281,7 +281,6 @@ class TestLoadSettings(unittest.TestCase):
                                                      "rundir"), sample_sheet=test_samplesheet, threshold=100,
                                               maxDepth=1000, reference=test_ref,
                                               out_base=pathlib.Path(__file__).parent / "data" / "out_dir_2")
-        expected_report.port = 50542
         processed = (pathlib.Path(__file__).parent / 'data' /'workflow_table'/
                      'rundir'/'test_dir'/'fastq_pass'/'barcode01'/'barcode01-0.fastq.gz')
         expected_report.add_processed_file(processed)
@@ -885,8 +884,6 @@ class TestUpdatePlot(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_success_open_window(self, mock_create_bam, mock_run, mock_open):
         """Successfully update the plot when the browser is not yet open; update report status"""
-        # output to a consistent "port"
-        port = 50542
         test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
                                           reference=self.test_ref, out_base=self.test_outdir)
         assert not test_report.is_open
@@ -930,8 +927,6 @@ class TestUpdatePlot(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_success_single_ref(self, mock_create_bam, mock_run, mock_open):
         """Update the plot when we're using a single reference and a region file"""
-        # output to a consistent "port"
-        port = 50542
         test_report = seq_mon.CoverReport(self.test_dir, sample_sheet=self.test_samplesheet, threshold=10, maxDepth=100,
                                           reference=self.test_ref / "test_ref.fa", out_base=self.test_outdir,
                                           region_file=self.test_ref / "test_region.bed")
@@ -1030,7 +1025,6 @@ class TestStartCovermon(unittest.TestCase):
     def test_default_one_ref(self, mock_create_bam, mock_run,
                              mock_open):
         """Output to the default output directory when using a single reference."""
-        port = 50542
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
@@ -1070,7 +1064,6 @@ class TestStartCovermon(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_default_refdir(self, mock_create_bam, mock_run, mock_open):
         """Output to the default output directory when using a reference directory."""
-        port = 50542
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
@@ -1110,7 +1103,6 @@ class TestStartCovermon(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_custom_output(self, mock_create_bam, mock_run, mock_open):
         """Output to a user-specified output directory."""
-        port = 50542
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
@@ -1150,7 +1142,6 @@ class TestStartCovermon(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_region_file(self, mock_create_bam, mock_run, mock_open):
         """Use a region file."""
-        port = 50542
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
@@ -1185,16 +1176,13 @@ class TestStartCovermon(unittest.TestCase):
         mock_open.assert_called_with(f"file://{self.test_outdir / 'plot_cov.html'}")
         mock_run.assert_has_calls([plot_call])
 
-    @mock.patch(f"{seq_mon.__name__}.random.randrange")
     @mock.patch(f"{seq_mon.__name__}.subprocess.run")
     @mock.patch(f"{seq_mon.__name__}.create_bam")
-    def test_fail_wrong_settings(self, mock_create_bam, mock_run, mock_rand):
+    def test_fail_wrong_settings(self, mock_create_bam, mock_run):
         """Fail if continuing in a directory with different settings."""
-        port = 50500
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
-        mock_rand.return_value = port
         cover_threshold = "100"
         max_depth = "1000"
         sheet = pd.DataFrame(data={"sample_id": ["test1", "test2", "test3", "test4"],
@@ -1241,9 +1229,6 @@ class TestStartCovermon(unittest.TestCase):
     @mock.patch(f"{seq_mon.__name__}.create_bam")
     def test_existing_processed(self, mock_create_bam, mock_run, mock_open):
         """Output to a directory already containing processed files."""
-        # we don't want to accidentally hit our target port while randomly generating the port
-        port = 50500
-        target_port = 50542
         mock_subprocess = mock.Mock()
         mock_run.return_value = mock_subprocess
         mock_create_bam.side_effect = bam_creator
