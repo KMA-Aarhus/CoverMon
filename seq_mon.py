@@ -614,10 +614,7 @@ def start_covermon(start_args) -> None:
         else:
             still_sequencing = False
 
-
     logger.info("  The sequencing summary has been found. Run complete    ✓")
-    # TODO do we need this
-    webbrowser.open_new_tab(f"file://{report.out_base / 'plot_cov.html'}")
 
 if __name__ == "__main__":
     start_covermon(sys.argv[1:])
