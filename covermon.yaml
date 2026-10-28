@@ -1,11 +1,14 @@
 name: covermon
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
   - mamba
 dependencies:
- - pandas = 1.4.3
- - numpy = 1.23.1
+ - ca-certificates>=2026.10.19
+ - certifi>=2026.10.19
+ - pip>=26.2.2
+ - pandas = 2.*
+ - numpy >= 1.23.1
  - cowpy = 1.1.0
  - openpyxl = 3.0.3
  - samtools = 1.15.1
