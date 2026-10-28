@@ -1,5 +1,5 @@
 __author__ = "Tine Sneibjerg Ebsen"
-__version__ = "0.2"
+__version__ = "0.2.1"
 
 import sys
 import os
