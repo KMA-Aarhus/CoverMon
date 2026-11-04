@@ -108,22 +108,9 @@ plot_cov <- function(file) {
   
   filtered <- cvg |> filter(Contig %in% large_contigs)
   
-  filtered <- cvg %>% mutate(contig_nr = as.numeric(factor(Contig))) %>% mutate(idx = row_number(), color_grp = contig_nr %% 9)
-  filtered <- filtered %>% mutate(color_grp = as.character(ifelse(color_grp==5,10, color_grp)))
-  reduced <- filtered %>%  slice(which(Pos %% 10 == 0))
- 
-  plt <- ggplot(reduced,aes(x=idx, y=Coverage,color = color_grp,"5"), show.legend=FALSE)+
-    geom_line(aes(group=Contig), show.legend=FALSE) + 
-    geom_hline(aes(yintercept = threshold), color="darkred", show.legend=FALSE) +
-    ylim(0,maxDepth) + 
-    labs(title=barcode,x="Position",y="Coverage",linetype="Cutoff") +
-    theme_solarized(light = FALSE) + 
-    theme(title=element_text(size=24, color="lightgrey"),axis.text=element_text(size=20, color="lightgrey"),
-        axis.title=element_text(size=22,face="bold"))+
-    scale_color_manual(values = myColors)
-  if (plot_regions== TRUE) { 
   filtered <- cvg |>
               mutate(contig_nr = as.numeric(factor(Contig))) |>
+              mutate(idx = row_number(), color_grp = contig_nr %% 9, Coverage = as.numeric(Coverage))
   filtered <- filtered |> mutate(color_grp = as.character(ifelse(color_grp==5,10, color_grp)))
   reduced <- filtered |>  slice(which(Pos %% 10 == 0))
   plt <- ggplot2::ggplot(reduced, aes(x = idx, y = Coverage, color = color_grp), show.legend = FALSE) +
