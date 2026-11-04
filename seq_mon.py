@@ -40,7 +40,6 @@ class CoverReport:
         processed_files:    the files processed by this instance of CoverMon
         region_file:        path to bed file with regions in the reference
                             (optional, only allowed if reference is a single file)
-        port:               the port where to serve the report html
     """
     def __init__(self, indir: pathlib.Path, sample_sheet: pathlib.Path, threshold: int, maxDepth: int,
                  reference: pathlib.Path, out_base: Optional[pathlib.Path] = None,
