@@ -1,7 +1,7 @@
 """Monitor an ongoing sequencing run and visualize results."""
 
 __author__ = "Tine Sneibjerg Ebsen, Kat Steinke"
-__version__ = "0.3"
+__version__ = "1.0.0"
 
 import argparse
 import copy
