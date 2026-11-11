@@ -115,7 +115,7 @@ plot_cov <- function(file) {
   plt <- ggplot2::ggplot(reduced, aes(x = idx, y = Coverage, color = color_grp), show.legend = FALSE) +
           ggplot2::geom_line(aes(group = contig_nr), show.legend = FALSE) +
           ggplot2::geom_hline(aes_string(yintercept = threshold), color="darkred") +
-          ylim(0, maxDepth) +
+          ylim(0, as.numeric(maxDepth)) +
           ggplot2::labs(title = barcode, x = "Position", y = "Coverage", linetype = "Cutoff") +
           theme_solarized(light = FALSE) +
           ggplot2::theme(title = element_text(size = 24, color = "lightgrey"), axis.text = element_text(size = 20, color = "lightgrey"),
