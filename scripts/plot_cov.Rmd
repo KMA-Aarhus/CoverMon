@@ -106,9 +106,8 @@ plot_cov <- function(file) {
   cvg$Coverage[cvg$Coverage > maxDepth] <- maxDepth 
   large_contigs <- cvg |> group_by(Contig) |> count() |> filter(n >= 1000) |>   pull(Contig)
   
-  filtered <- cvg |> filter(Contig %in% large_contigs)
-  
   filtered <- cvg |>
+              dplyr::filter(Contig %in% large_contigs) |>
               mutate(contig_nr = as.numeric(factor(Contig))) |>
               mutate(idx = row_number(), color_grp = contig_nr %% 9, Coverage = as.numeric(Coverage))
   filtered <- filtered |> mutate(color_grp = as.character(ifelse(color_grp==5,10, color_grp)))
