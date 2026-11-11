@@ -27,6 +27,11 @@ params:
 }
 </style>
 
+```{js echo = FALSE}
+setTimeout(function(){
+   window.location.reload(1);
+}, 30000);
+```
 ```{r echo=F, message=F, warning=F}
 # A function that returns a new table number for each run
 tableno_var = 0
@@ -35,6 +40,7 @@ tableno = function() {
     tableno_var
 }
 ```
+
 ```{r, include = FALSE}
 knitr::opts_chunk$set(
       echo    = FALSE
@@ -42,16 +48,11 @@ knitr::opts_chunk$set(
     , message = FALSE
 )
 # Load required libraries
-if (!require("tidyverse")) {
-install.packages("tidyverse") }
-if (!require("RColorBrewer")) {
-install.packages("RColorBrewer") }
-if (!require("cowplot")) {
-install.packages("cowplot") }
-if (!require("ggthemes")) {
-install.packages("ggthemes") }
-if (!require("kableExtra")) {
-install.packages("kableExtra") }
+library("tidyverse")
+library("RColorBrewer")
+library("cowplot")
+library("ggthemes")
+library("kableExtra")
 plot_regions = FALSE
 
 ## Pull in the data
@@ -61,7 +62,7 @@ if (!params$region_file == "NA") {
 }
 
 
-samplesheet = read.table(params$samplesheet, header=TRUE, sep = "\t")
+samplesheet = readxl::read_excel(params$samplesheet)
 
 files = list.files(paste0(params$path,"/"), pattern=".depth", all.files=FALSE, full.names=TRUE)
 if (!params$threshold == "NA") {
@@ -103,39 +104,39 @@ plot_cov <- function(file) {
   percent_over_threshold <- (nrow(cvg[cvg$Coverage >= threshold,])/nrow(cvg))*100
   percent_over_threshold <- round(percent_over_threshold, digits=2)
   cvg$Coverage[cvg$Coverage > maxDepth] <- maxDepth 
-  large_contigs <- cvg %>% group_by(Contig) %>% count() %>% filter(n >= 1000) %>%   pull(Contig)
+  large_contigs <- cvg |> group_by(Contig) |> count() |> filter(n >= 1000) |>   pull(Contig)
   
-  filtered <- cvg %>% filter(Contig %in% large_contigs)
-  
-  filtered <- cvg %>% mutate(contig_nr = as.numeric(factor(Contig))) %>% mutate(idx = row_number(), color_grp = contig_nr %% 9)
-  filtered <- filtered %>% mutate(color_grp = as.character(ifelse(color_grp==5,10, color_grp)))
-  reduced <- filtered %>%  slice(which(Pos %% 10 == 0))
- 
-  plt <- ggplot(reduced,aes(x=idx, y=Coverage,color = color_grp,"5"), show.legend=FALSE)+
-    geom_line(aes(group=Contig), show.legend=FALSE) + 
-    geom_hline(aes(yintercept = threshold), color="darkred", show.legend=FALSE) +
-    ylim(0,maxDepth) + 
-    labs(title=barcode,x="Position",y="Coverage",linetype="Cutoff") +
-    theme_solarized(light = FALSE) + 
-    theme(title=element_text(size=24, color="lightgrey"),axis.text=element_text(size=20, color="lightgrey"),
-        axis.title=element_text(size=22,face="bold"))+
-    scale_color_manual(values = myColors)
-  if (plot_regions== TRUE) { 
+  filtered <- cvg |>
+              dplyr::filter(Contig %in% large_contigs) |>
+              mutate(contig_nr = as.numeric(factor(Contig))) |>
+              mutate(idx = row_number(), color_grp = contig_nr %% 9, Coverage = as.numeric(Coverage))
+  filtered <- filtered |> mutate(color_grp = as.character(ifelse(color_grp==5,10, color_grp)))
+  reduced <- filtered |>  slice(which(Pos %% 10 == 0))
+  plt <- ggplot2::ggplot(reduced, aes(x = idx, y = Coverage, color = color_grp), show.legend = FALSE) +
+          ggplot2::geom_line(aes(group = contig_nr), show.legend = FALSE) +
+          ggplot2::geom_hline(aes_string(yintercept = threshold), color="darkred") +
+          ylim(0, as.numeric(maxDepth)) +
+          ggplot2::labs(title = barcode, x = "Position", y = "Coverage", linetype = "Cutoff") +
+          theme_solarized(light = FALSE) +
+          ggplot2::theme(title = element_text(size = 24, color = "lightgrey"), axis.text = element_text(size = 20, color = "lightgrey"),
+                axis.title = element_text(size = 22, face = "bold")) +
+          ggplot2::scale_color_manual(values = myColors)
+  if (plot_regions == TRUE) {
     regions <- regions[,1:3]
     colnames(regions) = c("chr","start","stop")
     
-    regions <- regions %>%
-         group_by(chr) %>%
+    regions <- regions |>
+         group_by(chr) |>
          mutate(dodge = row_number()) 
-    regions <- regions %>%
-      left_join(filtered %>% select(Contig, color_grp) %>% distinct(), by = c("chr" = "Contig")) %>%
+    regions <- regions |>
+      left_join(filtered |> select(Contig, color_grp) |> distinct(), by = c("chr" = "Contig")) |>
       mutate(color_grp = as.character(color_grp)) # Align colors with filtered
     idx_start = inner_join(regions, filtered, by=c("chr"="Contig", "start"="Pos"))
     regions$idx_start <- idx_start$idx
     idx_stop = inner_join(regions, filtered, by=c("chr"="Contig", "stop"="Pos"))
     regions$idx_stop <- idx_stop$idx
-    regions <- regions %>% 
-      ungroup() %>% 
+    regions <- regions |>
+      ungroup() |>
       mutate(region_label = row_number())
 
 
@@ -182,19 +183,19 @@ summary_df <- data.frame(cbind(barcodes, mean_covs, percent_over_thresholds))
 
 names(summary_df) <- c("Barcode", "Mean coverage", "percent_over_threshold")
 #paste0("Percent over ",as.character(threshold),"x")
-summary_df <- summary_df %>%  
+summary_df <- summary_df |>
     mutate(Barcode = as.character(Barcode))
 
-samplesheet <- samplesheet %>%  
+samplesheet <- samplesheet |>
     mutate(barcode = as.character(barcode))
-
+# keep the old pipe here for now
 full_table <- full_join(summary_df, samplesheet, by=c("Barcode"="barcode")) %>% replace(.=="NULL", 0)
 below_qc_table <- full_table[ which(full_table$percent_over_threshold < 90), ]
 
 colnames(below_qc_table)[3] <- paste0("% positions > ",as.character(threshold),"x")
 below_qc_table <- below_qc_table[order(below_qc_table$Barcode),]
-below_qc_table %>%
-  kbl(row.names=FALSE) %>%
+below_qc_table |>
+  kbl(row.names=FALSE) |>
   kable_styling(bootstrap_options = c("striped","bordered"))
 
 ```
@@ -209,7 +210,7 @@ for(plt in plots) {
 ```{r, fig.width=30, fig.height=5, fig.keep = 'all'}
 colnames(full_table)[3] <- paste0("% positions > ",as.character(threshold),"x")
 full_table <- full_table[order(full_table$Barcode),]
-full_table %>%
-  kbl(row.names=FALSE) %>%
+full_table |>
+  kbl(row.names=FALSE) |>
   kable_styling(bootstrap_options = c("striped","bordered"))
 ```

@@ -1,320 +1,599 @@
-__author__ = "Tine Sneibjerg Ebsen"
-__version__ = "0.2.1"
+"""Monitor an ongoing sequencing run and visualize results."""
 
+__author__ = "Tine Sneibjerg Ebsen, Kat Steinke"
+__version__ = "1.0.0"
+
+import argparse
+import copy
+import json
+import logging
+import pathlib
+import subprocess
 import sys
-import os
-from os import listdir
-from os.path import isfile, isdir, join, exists
+import time
+import webbrowser
+
+from typing import Optional, List
+
 import pandas as pd
 import numpy as np
-import subprocess
-import glob
-import time
 
-# new imports
-from pathlib import Path
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+console_log = logging.StreamHandler()
+logger.addHandler(console_log)
+
+# TODO add convenience wait function?
+
+class CoverReport:
+    """A coverage report generated on the base of input data and parameters, written to an output directory,
+    with tracking of open/close status and processed input files.
+    Attributes:
+        fastq_dir:          the directory containing sequencing data
+        workflow_table:     mapping of fastq_pass dirs to barcodes
+        sample_sheet:       path to sample sheet
+        threshold:          minimum coverage required
+        maxDepth:           maximum coverage reported
+        reference:          reference file or directory
+        out_base:           output base directory
+        is_open:            whether the report is currently opened in the browser
+        processed_files:    the files processed by this instance of CoverMon
+        region_file:        path to bed file with regions in the reference
+                            (optional, only allowed if reference is a single file)
+    """
+    def __init__(self, indir: pathlib.Path, sample_sheet: pathlib.Path, threshold: int, maxDepth: int,
+                 reference: pathlib.Path, out_base: Optional[pathlib.Path] = None,
+                 region_file: Optional[pathlib.Path] = None) \
+            -> None:
+        """Initialize a CoverReport object.
+
+        Args:
+            indir:          the directory containing sequencing data
+            sample_sheet:   path to sample sheet
+            threshold:      minimum coverage required
+            maxDepth:       maximum coverage reported
+            reference:      reference file or directory
+            out_base:       output base directory (optional)
+            region_file:    path to bed file with regions in the reference
+                            (optional, only allowed if reference is a single file)
 
 
-
-def start_covermon():
-    tab = "\t"
-    nl = "\n"
-
-    # Defines some helper functions
-
-    def samplesheet_parse(samplesheet):
-        samplesheet_extension = samplesheet.split(".")[-1]
-        print(f"Reading .{samplesheet_extension}-type sample sheet \"{samplesheet}\"")
-
-        if samplesheet_extension == "xlsx":
-                # Uses openpyxl
-            df = pd.read_excel(samplesheet, dtype = str)
-        elif samplesheet_extension == "xls":
-            df = pd.read_excel(samplesheet)
+        Raises:
+            ValueError  if the maximum reported coverage is lower than the minimum coverage required,
+                        or if a region file is given together with a reference base directory
+                        (=different references per sample)
+        """
+        # sense checks first
+        if threshold > maxDepth:
+            raise ValueError("Highest reported coverage must exceed minimum required coverage.")
+        if reference.is_dir() and region_file is not None:
+            raise ValueError("Cannot supply a region file when different references per sample are used "
+                             "(base ref is a directory)")
+        dummy, self.fastq_dir = validate_rundir(indir)
+        self.reference = reference
+        self.sample_sheet = sample_sheet
+        # sample sheet validation happens here
+        df = parse_samplesheet(self.sample_sheet)
+        validate_samplesheet(df, self.reference.is_file())
+        self.workflow_table = create_workflow_table(df, self.fastq_dir)
+        self.threshold = threshold
+        self.maxDepth = maxDepth
+        if out_base is not None:
+            self.out_base = pathlib.Path(out_base)
         else:
-            raise Exception(f"The spreadsheet must be excel formatted (.xlsx or .xls)")
+            covermon_dirname = "CoverMon"
+            if self.reference.is_file():
+                covermon_dirname = f"{covermon_dirname}_{self.reference.stem}"
+            self.out_base = self.fastq_dir.parent / covermon_dirname
+        self.is_open = False  # TODO: can we assume this?
+        self.processed_files: List[pathlib.Path] = []
+        self.region_file = region_file
 
-        # Clean up the spreadsheet
-        print("Cleaning sample sheet ...                              ", end = "", flush = True)
-        df.columns = map(str.lower, df.columns) # Lowercase
-        df.columns = map(str.strip, df.columns) # Remove edge-spaces
-        df.columns = map(lambda x: str(x).replace(" ", "_"), df.columns) # Replace spaces with underscore
-        df["barcode"] = df["barcode"].apply(np.vectorize(lambda x: str(x).strip().replace(" ", ""))) # Because we are later going to join using this column, it is necessary to strip it for spaces.
-        df = df.dropna(subset = ["sample_id"])# remove rows not containing a barcode
-        print("✓")
-        print(df)
-        return df
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, CoverReport):
+            return ((self.fastq_dir == other.fastq_dir
+                     and self.sample_sheet == other.sample_sheet
+                     and self.threshold == other.threshold
+                     and self.maxDepth == other.maxDepth
+                     and self.reference == other.reference
+                     and self.out_base == other.out_base
+                     and self.is_open == other.is_open
+                     and self.processed_files == other.processed_files
+                     and self.workflow_table.equals(other.workflow_table)
+                     and self.region_file == other.region_file))
+        return False
 
-    def validate_samplesheet(df):
-        # Check that the samplesheet contains the reference column if a refdir is given
-        if one_ref == False:
-            print("Checking that the necessary columns exist ...          ", end = "", flush = True)
-            for i in ["barcode", "reference","sample_id"]:
-                if not i in df.columns:
-                    raise Exception(f"The sample sheet is missing a necessary column. The sample sheet must contain the column {i}, but it only contains {df.columns.tolist()}")
-            print("✓")
-        # Check that the barcodes look correct
-        acceptable_barcodes = [f"NB{i:02d}" for i in range(1,97)] + [f"RB{i:02d}" for i in range(1,97)]
+    def __repr__(self):
+        return(f"CoverReport(fastq_dir={self.fastq_dir}, sample_sheet={self.sample_sheet}, "
+               f"threshold={self.threshold}, maxDepth={self.maxDepth},"
+               f" reference={self.reference}, region_file={self.region_file},"
+               f" out_base={self.out_base}, processed_files={[str(processed) for processed in self.processed_files]},"
+               f" is_open={self.is_open})\n"
+               f"Workflow table:\n{self.workflow_table.head().to_string()}")
 
-        print("Checking that the barcodes are correctly formatted ... ", end = "", flush = True)
+    def set_open_status(self, open_status: bool) -> None:
+        """Set the report's status to open (True) or closed (False)
 
-        for i in df["barcode"]:
-            if not i in acceptable_barcodes: 
-                raise Exception(f"The given barcode ", i, " is not an acceptable barcode. Here is a list of acceptable barcodes for inspiration:{nl} {' '.join(acceptable_barcodes)}")
-        print("✓")
+        Args:
+            open_status:    whether the report is currently opened in the browser (True) or not (False)
+        """
+        self.is_open = open_status
 
+    def add_processed_file(self, processed: pathlib.Path) -> None:
+        """Add a file to the record of processed files.
 
-        print("Checking that the barcodes are unique ...              ", end = "", flush = True)
-        if not len(df["barcode"]) == len(set(df["barcode"])):
-            bc_counts = pd.DataFrame(df['barcode'].value_counts())
-            bc_counts.columns = ["count"]
-            bc_counts = bc_counts[bc_counts["count"] > 1]
-            #print(nl, bc_counts)
-            raise Exception(f"{nl}One or more barcodes are duplicated. Each barcode may only be used once:{nl}{bc_counts}")
-        print("✓")
+        Args:
+            processed:  the path to the processed file
 
-        print()
-        print("These are the samples from the samplesheet you have given:")
-        print(df.to_string())
-        print("//")
-        print()
+        """
+        self.processed_files.append(processed)
 
+    def add_processed_files(self, processed_files: List[pathlib.Path]) -> None:
+        """Add a number of files to the record of processed files.
 
-    def validate_rundir(rundir):
-        if rundir[-1] == "/":
-            print("Removing trailing slash from rundir")
-            rundir = rundir[0:-1]
+        Args:
+            processed_files:    the processed files to add
+        """
+        self.processed_files.extend(processed_files)
 
-
-        print("Checking that the rundir exists ...                    ", end = "", flush = True)
-        if not os.path.isdir(rundir):
-            raise Exception(f"The rundir does not exist.")
-        print("✓")
-
-        print(f"Looking for MinKNOW-characteristic output:") #, end = "", flush = True)
-        # Wait for the rundir to occur in the specified path. 
-        # If it doesn't occur after a specified waiting time, then stop the p
-        for i in range(200):
-            print("  Looking ... ", end = "", flush = True)
-            fastq_pass_bases = glob.glob(rundir + "/**/fastq_pass", recursive = True) # Find any occurrence of the wanted path
-            if len(fastq_pass_bases) == 0:
-                print("nothing found yet, waiting 10 secs ...")
-                time.sleep(10) # Wait 10 seconds.
-            elif(i == 10):
-                print() # clean newline
-                raise Exception("nothing found after 10 tries. Aborting.")
-            else: 
-                print(f"Found                                    ✓")
-                break
+    def save_settings(self) -> None:
+        """Save the report's properties."""
+        settings = copy.deepcopy(vars(self))
+        path_settings = {"reference", "fastq_dir", "sample_sheet", "out_base", "region_file"}
+        settings["processed_files"] = [str(processed) for processed in settings["processed_files"]]
+        settings = {key: str(value.resolve()) if key in path_settings and value is not None else value
+                    for key, value in settings.items()}
+        settings.pop("workflow_table")
+        settings.pop("is_open")  # might be incorrectly set if the run is interrupted
+        out_file = self.out_base / "settings.json"
+        with open(out_file, "w", encoding = "utf-8") as settings_file:
+            json.dump(settings, settings_file, indent = 4)
 
 
-        if not len(fastq_pass_bases) == 1:
-            raise Exception(f"There seems to be more than one fastq_pass sub-directory beneath the given rundir. These paths were found:{nl} {str(nl + ' ').join(fastq_pass_bases)}{nl}Please specify a more specific rundir.")
+# TODO - leverage this for a convenient "--resume" flag?
+def load_report_from_settings(settings_file: pathlib.Path) -> CoverReport:
+    """Load a CoverReport from a settings.json file.
+
+    Args:
+        settings_file: the file from which to load settings
+
+    Returns:
+        The report defined by the archived settings
+    """
+    with open(settings_file, "r", encoding="utf-8") as settings:
+        existing_vars = json.load(settings)
+        existing_vars["indir"] = existing_vars.pop("fastq_dir")
+        processed = [pathlib.Path(processed_file).resolve() for processed_file in existing_vars.pop("processed_files")]
+    path_settings = {"reference", "indir", "sample_sheet", "out_base", "region_file"}
+    # we might have some ugly Nones
+    existing_vars = {key: pathlib.Path(value).resolve() if key in path_settings and value and value != "None"
+                    else value
+                    for key, value in existing_vars.items()}
+    # clean the Nones
+    existing_vars = {key: None if value == "None" else value for key, value in existing_vars.items()}
+    report = CoverReport(**existing_vars)
+    report.add_processed_files(processed)
+    return report
+
+def parse_samplesheet(samplesheet: pathlib.Path) -> pd.DataFrame:
+    """Clean an Excel sample sheet.
+
+    Args:
+        samplesheet: the path to the sample sheet
+
+    Returns:
+        The sample sheet with column names cleaned
+        (lowercase, leading/trailing whitespace stripped, remainder changed to underscores),
+        whitespace removed in barcode names,
+        and any rows without sample ID removed.
+    Raises:
+        ValueError   if the sheet is not in the correct format
+    """
+    samplesheet_extension = samplesheet.suffix
+    logger.info(f"Reading {samplesheet_extension}-type sample sheet \"{samplesheet}\"")
+
+    if samplesheet_extension not in {".xlsx", ".xls"}:
+        raise ValueError("The spreadsheet must be excel formatted (.xlsx or .xls)")
+    dtype_used = str if samplesheet_extension == ".xlsx" else None
+    df = pd.read_excel(samplesheet, dtype = dtype_used)
+
+    # Clean up the spreadsheet
+    logger.info("Cleaning sample sheet ...                              ")
+    df.columns = map(str.lower, df.columns)  # Lowercase
+    df.columns = map(str.strip, df.columns)  # Remove edge-spaces
+    df.columns = map(lambda x: str(x).replace(" ", "_"), df.columns)  # Replace spaces with underscore
+    # Because we are later going to join using this column, it is necessary to strip it for spaces.
+    df["barcode"] = df["barcode"].apply(np.vectorize(lambda x: str(x).strip().replace(" ",
+                                                                                      "")))
+    df = df.dropna(subset=["sample_id"])  # remove rows not containing a barcode
+    logger.info("Sample sheet cleaned ✓")
+    logger.debug(df.to_string())
+    return df
+
+def validate_samplesheet(samplesheet: pd.DataFrame, ref_is_file: bool) -> None:  # TODO: might be nicer with a bool output
+    """Check that the sample sheet contains the correct barcodes and no duplicates,
+    and all columns are present
+
+    Args:
+        samplesheet:    the processed sample sheet
+        ref_is_file:    whether the reference is a single file (True) or a directory (False)
+
+    Raises:
+        Exception   if a required column (barcode, reference, sample ID) is missing in a setup with a reference dir,
+                    if barcodes aren't correctly formatted,
+                    or if a barcode is duplicated
+    """
+    # Check that the samplesheet contains the reference column if a refdir is given
+    required_cols = ["barcode", "sample_id"]
+    if not ref_is_file:
+        required_cols.append("reference")
+    logger.info("Checking that the necessary columns exist ...")
+    for required_col in required_cols:  # TODO optimize with set ops?
+        if not required_col in samplesheet.columns:
+            raise KeyError("The sample sheet is missing a necessary column. "
+                            f"The sample sheet must contain the column {required_col}, "
+                            f"but it only contains {sorted(samplesheet.columns.tolist())}")
+    logger.info("All necessary columns found ✓")
+    # Check that the barcodes look correct
+    acceptable_barcodes = [f"NB{i:02d}" for i in range(1,97)] + [f"RB{i:02d}" for i in range(1,97)]
+
+    logger.info("Checking that the barcodes are correctly formatted ...")
+
+    for barcode in samplesheet["barcode"]:  # TODO catch all broken barcodes at once
+        if not barcode in acceptable_barcodes:
+            raise ValueError(f"The given barcode {barcode} is not an acceptable barcode. "
+                            f"Here is a list of acceptable barcodes for inspiration:\n{' '.join(acceptable_barcodes)}")
+    logger.info("Barcodes are correct ✓")
 
 
-        fastq_pass_base = fastq_pass_bases[0]
-        del fastq_pass_bases
-        print(f"Found the following fastq_pass base which will be given to CoverMon: {nl}  {fastq_pass_base}{nl}")
+    logger.info("Checking that the barcodes are unique ...")
+    if not len(samplesheet["barcode"]) == len(set(samplesheet["barcode"])):
+        bc_counts = pd.DataFrame(samplesheet['barcode'].value_counts())
+        bc_counts.columns = ["count"]
+        bc_counts = bc_counts[bc_counts["count"] > 1]
+        raise ValueError(f"\nOne or more barcodes are duplicated. Each barcode may only be used once:\n{bc_counts}")
+    logger.info("All barcodes are unique ✓")
 
+    logger.info("These are the samples from the samplesheet you have given:\n"
+                f"{samplesheet.to_string()}\n"
+                "//")
 
-        # base_dir is the place where fastq_pass, fast5_pass and the sequencing summary resides.
-        base_dir = os.path.dirname(fastq_pass_base) # This only works because there is NOT a trailing slash on the fastq_pass_base
-        print(f"This is the batch base directory:{nl}  {base_dir}")
+def validate_rundir(rundir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    """Check whether the rundir exists, and find the fastq_pass directory and its parent dir, possibly waiting for
+    the fastq_pass directory to be created.
+    Parts adapted from SnakeAmp.
 
-        return base_dir, fastq_pass_base
+    Args:
+        rundir: the directory containing sequence data *somewhere*
 
-    def create_workflow_table(df):
-        disk_barcodes_list  = sorted(glob.glob(fastq_pass_base + "/barcode*")) # Find all fastq_pass/barcode* directories
-        disk_barcodes_df = pd.DataFrame({'barcode_path': disk_barcodes_list})
+    Returns:
+        The parent directory of the fastq_pass directory and the fastq_pass directory
+    Raises
+        FileNotFoundError:  if the rundir does not exist,
+                            or if the fastq_pass directory was not found after the end of the waiting time,
+        ValueError:         if multiple fastq_pass directories were found
+    """
+    logger.info("Checking that the rundir exists ...                    ")
+    if not rundir.exists():
+        raise FileNotFoundError("The rundir does not exist.")
+    print("✓")
+    existing_path = rundir.parts
+    logger.info("Looking for MinKNOW-characteristic output:") #, end = "", flush = True)
+    # Wait for the rundir to occur in the specified path.
+    # If it doesn't occur after a specified waiting time, then stop the p
+    # TODO: convenience waiting function here?
+    for i in range(10):
+        logger.info("  Looking ... ")
+        try:
+            # if the fastq_pass directory already is somewhere in the dirs given, use this
+            fastq_pass_parts = existing_path[:existing_path.index("fastq_pass") + 1]
+            # parts contains the initial "/" - resolve the path to clean this up
+            fastq_pass_base = pathlib.Path("/".join(fastq_pass_parts)).resolve()
+            # do we end with something that actually exists?
+        except ValueError:
+            logger.info(f"Searching for fastq_pass folder in {rundir}...")
+            fastq_pass_bases = list(rundir.glob("**/fastq_pass"))
+            if fastq_pass_bases:
+                if len(fastq_pass_bases) > 1:
+                    bad_paths = '\n '.join([str(base) for base in fastq_pass_bases])
+                    error_msg = ("There seems to be more than one fastq_pass sub-directory beneath the given rundir."
+                            " These paths were found:\n"
+                            f"{bad_paths}"
+                            "\nPlease specify a more specific rundir.")
+                    raise ValueError(error_msg)
 
-
-        disk_barcodes_df = disk_barcodes_df.assign(barcode_basename = [i.split("/")[-1] for i in disk_barcodes_df["barcode_path"]])
-        if "RB" in df["barcode"][0]:
-            disk_barcodes_df = disk_barcodes_df.assign(barcode = ["RB" + i[-2:] for i in disk_barcodes_df["barcode_path"]])
-        elif "NB" in df["barcode"][0]:
-            disk_barcodes_df = disk_barcodes_df.assign(barcode = ["NB" + i[-2:] for i in disk_barcodes_df["barcode_path"]])
-        else:
-            raise Exception(f"Barcodes in samplesheet are not acceptable")
-
-        print("Continuing with the following barcodes:")
-
-        # the workflow_table is the table that contains the records where the barcode could be found on the disk.
-        workflow_table = disk_barcodes_df.merge(df, how='left', on='barcode') # left join (merge) the present barcodes onto the df table.
-        workflow_table = workflow_table.dropna(subset = ["sample_id"])
-
-        print(workflow_table)
-        print("//")
-        print()
-        return workflow_table
-
-    def write_to_processed(f):
-        processed_files_txt = open(f"{out_base}/processed_files.txt","a")
-        processed_files_txt.write(f"{f}{nl}")
-        processed_files_txt.close()
-
-    def update_plot(workflow_table, reference, samplesheet,open_report):
-        print("Scanning for new fastq files...")
-        for index, row in workflow_table.iterrows():
-            bam_out = out_base+"/"+row['barcode']+".bam"
-            depth = out_base+"/"+row['barcode']+".depth"
-            barcode_path = row['barcode_path']
-            if not one_ref:
-                reference = refdir+"/"+row['reference']
-            unprocessed = [barcode_path+"/"+f for f in listdir(barcode_path) if (barcode_path+"/"+f not in processed_files and isfile(join(barcode_path, f)))]
-
-            for f in unprocessed:
-                # Check if we have an existing read mapping to append to. If not, creates the first one and continues the loop without merging.
-                if not exists(bam_out):
-                    map_cmd = f"minimap2 -a -o {tmpsam} {reference} {f}"
-                    print(map_cmd)
-                    subprocess.run(map_cmd.split())
-                    sam2bam = f'samtools sort -O bam -o {bam_out} {tmpsam}'
-                    print("Creating initial bam: ", sam2bam)
-                    subprocess.run(sam2bam.split())
-
-                    processed_files.append(f)
-                    write_to_processed(f)
-
-                    print("Number of processed files: ", len(processed_files))
+                fastq_pass_base = fastq_pass_bases[0]
+                logger.info("Found                                    ✓")
+            else:
+                if i < 10:
+                    logger.info("nothing found yet, waiting 10 secs ...")
+                    time.sleep(10)  # Wait 10 seconds.
                 else:
-                    # Maps new reads to reference
-                    map_cmd = f"minimap2 -a -o {tmpsam} {reference} {f}"
-                    print(map_cmd)
-                    subprocess.run(map_cmd.split())
-                    # Sort the mapping files for merging
-                    sort_cmd = f'samtools sort -O bam -o {out_base}/sorted.bam {tmpsam}'
-                    print(sort_cmd)
-                    subprocess.run(sort_cmd.split())
-                    # Merges the sorted files
-                    merge_cmd = f'samtools merge -f -o {tmpbam} {out_base}/sorted.bam {bam_out}'
-                    print(merge_cmd)
-                    subprocess.run(merge_cmd.split())
-                    #Sets the new bam to the barcode bam and marks file as processed
-                    subprocess.run(['mv', tmpbam, bam_out])
-                    processed_files.append(f)
-                    write_to_processed(f)
+                    raise FileNotFoundError("nothing found after 10 tries. Aborting.")
+    logger.info(f"Found the following fastq_pass base which will be given to CoverMon: \n  {fastq_pass_base}\n")
 
-                    print("Number of processed files: ", len(processed_files))
-                # Index the new bam and calculate depth. Then creates the monitoring html
-                plot_cov_cmd1 = f'samtools index '+ bam_out
-                plot_cov_cmd2 = f'samtools depth -aa {bam_out} -o {depth}'
-                #Getting the below line to run was a pain. Hence, it is presented as a list.
-                    
-                print(plot_cov_cmd1.split())
-                subprocess.run(plot_cov_cmd1.split())
-                print(plot_cov_cmd2.split())
-                subprocess.run(plot_cov_cmd2.split())
-                plot_cov_cmd3 = ["Rscript", "-e", "\"rmarkdown::render(input = ", "\'scripts/plot_cov.Rmd\',", "params = list(threshold = ",threshold,", maxDepth= ",maxDepth,", path = ", "\'"+out_base+"\', samplesheet = ", "\'"+samplesheet+"\', region_file = ", "\'"+region_file+"\'))\""]
-                    
-                print(plot_cov_cmd3)
-                subprocess.run(" ".join(plot_cov_cmd3), shell=True)
-                subprocess.run(['mv', 'scripts/plot_cov.html', out_base])
 
-                # Starts browser-sync in a new terminal if the report is not open. This will not work on windows or macOS.
-                print("Updated plot, open_report = ", open_report)
-                if open_report == False:
-                    print("open_report = ", open_report, ". Opening report")
-                    subprocess.run("gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + out_base +"\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"", shell=True)        
-                    open_report = True
-        return open_report
+    # base_dir is the place where fastq_pass, fast5_pass and the sequencing summary resides.
+    base_dir = fastq_pass_base.parent
+    logger.info(f"This is the batch base directory:\n  {base_dir}")
 
+    return base_dir, fastq_pass_base
+
+
+def create_workflow_table(samplesheet: pd.DataFrame, fastq_pass_dir: pathlib.Path) -> pd.DataFrame:
+    """Record locations of barcode directories for each barcode.
+
+    Args:
+        samplesheet:    the sample sheet containing barcodes, sample IDs and optionally references
+        fastq_pass_dir: the path to the fastq_pass directory
+
+    Returns:
+        The sample sheet with the locations of the barcode fastq directories added for each sample
+
+    Raises:
+        Exception   if the barcodes' format is invalid
+    """
+    disk_barcodes_list  = sorted(list(fastq_pass_dir.glob("barcode*"))) # Find all fastq_pass/barcode* directories
+    disk_barcodes_df = pd.DataFrame({'barcode_path': disk_barcodes_list})
+
+
+    disk_barcodes_df["barcode_basename"] = disk_barcodes_df["barcode_path"].apply(lambda barcode_path: barcode_path.name)
+    if "RB" in samplesheet["barcode"][0]:
+        disk_barcodes_df["barcode"] = (disk_barcodes_df["barcode_basename"]
+                                       .apply(lambda barcode: "RB" + barcode[-2:]))
+    elif "NB" in samplesheet["barcode"][0]:
+        disk_barcodes_df["barcode"] = (disk_barcodes_df["barcode_basename"]
+                                       .apply(lambda barcode: "NB" + barcode[-2:]))
+    else:
+        raise ValueError("Barcodes in samplesheet are not acceptable")
+    # all path operations done, back to strings
+    disk_barcodes_df["barcode_path"] = disk_barcodes_df["barcode_path"].apply(str)
+
+    # ensure consistent column format
+    sample_cols = samplesheet.columns.tolist()
+    barcode_cols = ["barcode_path", "barcode_basename"]
+    out_cols = [*sample_cols, *barcode_cols]
+
+    # the workflow_table is the table that contains the records where the barcode could be found on the disk.
+    # left join (merge) the present barcodes onto the df table.
+    workflow_table = disk_barcodes_df.merge(samplesheet, how='left', on='barcode')
+    workflow_table = workflow_table.dropna(subset = ["sample_id"]).reindex(columns = out_cols)
+
+    logger.info(f"Continuing with the following barcodes:\n{workflow_table.to_string()}\n//")
+    return workflow_table
+
+# we probably have to keep this until we've established that nothing else uses it
+def write_to_processed(to_write: str, out_dir: pathlib.Path) -> None:
+    """Append the given string to "processed_files.txt" in the specified outdir
+
+    Args:
+        to_write: the string to write to the file
+        out_dir:  the base directory in which to write to the file
+
+    """
+    with open(out_dir / "processed_files.txt","a", encoding = "utf-8") as processed_files_txt:
+        processed_files_txt.write(f"{to_write}\n")
+
+def create_bam(fastq: pathlib.Path, out_base: pathlib.Path, out_bam: pathlib.Path, reference: pathlib.Path)\
+        -> None:
+    """Align a fastq file for a new barcode to the reference and output results.
+
+    Args:
+        out_bam:
+        fastq:      the fastq file to process
+        out_base:   the output directory to write results to
+        reference:  the reference file to align the fastq to
+
+    """
+    tmpsam = out_base / "tmp.sam"
+    map_cmd = f"minimap2 -a -o {tmpsam} {reference} {fastq}"
+    logger.debug(map_cmd)
+    map_process = subprocess.run(map_cmd.split(), check = True)
+    sam2bam = f'samtools sort -O bam -o {out_bam} {tmpsam}'
+    logger.info("Creating initial bam")
+    logger.debug(sam2bam)
+    subprocess.run(sam2bam.split(), check = True)
+
+
+def append_bam(fastq: pathlib.Path, out_base: pathlib.Path, out_bam: pathlib.Path, reference: pathlib.Path)\
+        -> None:
+    """Append alignment of new fastqs for an existing barcode to existing results
+
+    Args:
+        fastq:      the fastq file to process
+        out_base:   the output directory to write results to
+        out_bam:    the bam file to combine results with
+        reference:  the reference file to align the fastq to
+    """
+    tmpsam = out_base / "tmp.sam"
+    tmpbam = out_base / "tmp.bam"
+    map_cmd = f"minimap2 -a -o {tmpsam} {reference} {fastq}"
+    logger.debug(map_cmd)
+    subprocess.run(map_cmd.split(), check = True)
+    # Sort the mapping files for merging
+    sort_cmd = f'samtools sort -O bam -o {out_base}/sorted.bam {tmpsam}'
+    logger.debug(sort_cmd)
+    subprocess.run(sort_cmd.split(), check = True)
+    # Merges the sorted files
+    merge_cmd = f'samtools merge -f -o {tmpbam} {out_base}/sorted.bam {out_bam}'
+    logger.debug(merge_cmd)
+    subprocess.run(merge_cmd.split(), check = True)
+    # Sets the new bam to the barcode bam and marks file as processed
+    subprocess.run(['mv', tmpbam, out_bam], check = True)
+
+
+def get_depth(bam: pathlib.Path, depth_out: pathlib.Path) -> None:
+    """Get depths based on bam file
+
+    Args:
+        bam:        the bam file to process
+        depth_out:  the depth file to write to
+
+    """
+    plot_cov_cmd1 = 'samtools index ' + str(bam)
+    plot_cov_cmd2 = f'samtools depth -aa {bam} -o {depth_out}'
+
+    logger.debug(plot_cov_cmd1)
+    subprocess.run(plot_cov_cmd1.split(), check = True)
+    logger.debug(plot_cov_cmd2)
+    subprocess.run(plot_cov_cmd2.split(), check = True)
+
+def get_r_cmd(active_report: CoverReport) -> List[str]:
+    """Get the command for plotting coverage.
+
+    Args:
+        active_report:  the CoverReport to plot
+
+    Returns:
+        The command for plotting coverage from the given report
+    """
+    plot_cmd = ["Rscript",
+                     str(pathlib.Path(__file__).parent.resolve() / "scripts" / "run_plot.R"),
+                     str(active_report.out_base.resolve()),
+                     str(active_report.sample_sheet.resolve()),
+                     str(active_report.threshold),
+                     str(active_report.maxDepth)]
+    if active_report.region_file:
+        plot_cmd.extend(["--region_file", str(active_report.region_file)])
+    return plot_cmd
+
+
+# TODO remember to save the files here
+def update_plot(active_report: CoverReport) -> None:
+    """Create or update the coverage plot for a given report and show plot in a browser window
+
+    Args:
+        active_report:  the CoverReport to plot
+    """
+    # Define temporary mapping files which will be used for merging new mapping of new output files with existing
+    workflow_table = active_report.workflow_table.copy(deep=True)
+    out_base = active_report.out_base
+    logger.info("Scanning for new fastq files...")
+    workflow_table["bam_out"] = workflow_table["barcode"].apply(lambda barcode: out_base / f"{barcode}.bam")
+    workflow_table["depth"] = workflow_table["barcode"].apply(lambda barcode: out_base / f"{barcode}.depth")
+    workflow_table["reference"] = workflow_table["reference"].apply(lambda ref: active_report.reference / ref) \
+                                  if active_report.reference.is_dir() else active_report.reference
+    for index, row in workflow_table.iterrows():
+        bam_out = row["bam_out"]
+        depth = row["depth"]
+        barcode_path = pathlib.Path(row['barcode_path'])
+        reference = row["reference"]
+        unprocessed = [barcode_file.resolve() for barcode_file in barcode_path.iterdir() if
+                       (barcode_file.resolve() not in active_report.processed_files and barcode_file.is_file()
+                        and {".fastq", ".fq"}.intersection(barcode_file.suffixes))]
+
+        for unprocessed_file in unprocessed:
+            # Check if we have an existing read mapping to append to.
+            # If not, creates the first one and continues the loop without merging.
+            if not bam_out.exists():
+                create_bam(unprocessed_file, out_base, bam_out, reference)
+            else:
+                # Maps new reads to reference
+                append_bam(unprocessed_file, out_base, bam_out, reference)
+            # Index the new bam and calculate depth.
+            get_depth(bam_out, depth)
+            active_report.add_processed_file(unprocessed_file)
+            write_to_processed(str(unprocessed_file), out_base)  # TODO: replace with saving settings?
+            active_report.save_settings()
+
+            logger.info(f"Number of processed files: {len(active_report.processed_files)}")
+
+            # Now create the monitoring html if needed
+            plot_cov_cmd3 = get_r_cmd(active_report)
+            logger.debug(" ".join(plot_cov_cmd3))
+            subprocess.run(" ".join(plot_cov_cmd3), shell=True, check = True)
+            logger.info("Updated plot")
+            if not active_report.is_open:
+                logger.info("Opening report")
+                active_report.set_open_status(True)
+                webbrowser.open_new_tab(f"file://{active_report.out_base / 'plot_cov.html'}")
+
+# TODO break this up into separate functions
+def start_covermon(start_args) -> None:
+    """Start monitoring with the supplied arguments
+
+    Args:
+        start_args: the arguments supplied by the user
+
+
+    """
     #####################
     # Start the monitor #
     #####################
-
     # Parse and check arguments
-    if len(sys.argv) < 4:
-        raise Exception(f"Missing arguments. The script must contain (1) samplesheet, (2) path to run directory, (3) path to reference or reference directory, (4) threshold for minimum coverage, (5) maximum depth displayed in plot. Optionally, a region file (6) can be specified if all samples use the same reference genome.")
+    parser = argparse.ArgumentParser(description="Start CoverMon")
+    parser.add_argument("samplesheet", help = "Path to sample sheet for run")
+    parser.add_argument("rundir", help = "Path to the directory containing sequencing data")
+    parser.add_argument("reference",
+                        help = "Path to the reference fasta file or directory with reference files to use")
+    parser.add_argument("threshold", help = "Minimum coverage to pass QC")
+    parser.add_argument("maxdepth", help = "Maximum depth to plot")
+    parser.add_argument("--region_file",
+                        help = "Path to the region file to be used (optional, only for a single reference file)",
+                        default = None)
+    parser.add_argument("--outdir",
+                        help = "Path to the output directory (default: [rundir]/CoverMon if reference is a dir,"
+                               "[rundir]/CoverMon_[ref_filename] otherwise)", default = None)
+    args = parser.parse_args(start_args)
+    rundir = pathlib.Path(args.rundir)
+    region_file = pathlib.Path(args.region_file) if args.region_file else None
+    out_dir = pathlib.Path(args.outdir) if args.outdir else None
+    # initialize the report
+    # Set an open_report state to stop opening multiple reports
+    logger.debug("Initializing report as closed")
+    report = CoverReport(rundir, pathlib.Path(args.samplesheet), int(args.threshold), int(args.maxdepth),
+                         pathlib.Path(args.reference), out_dir, region_file)
 
-    samplesheet = sys.argv[1]
-    rundir = sys.argv[2]
-    threshold = sys.argv[4]
-    maxDepth = sys.argv[5]
-
-    if ".fa" in sys.argv[3]:
-        reference = sys.argv[3]
-        one_ref = True
-        if len(sys.argv) == 7:
-            region_file = sys.argv[6]
-            print("This is the region file:", sys.argv[6])
-        else: 
-            region_file = "NA"
-    else:
-        refdir = sys.argv[3]
-        one_ref = False
-        region_file = "NA"
-
-    print(f"These are the parameters given:")
-    print("This is the samplesheet: ", samplesheet)
-    print("This is the run directory: ", rundir)
-    if one_ref == True:
-        print("This is the reference:", reference)
-    else:
-        print("This is the reference directory:", refdir)
-    print("This is the threshold: ", threshold)
-    print("This is the maxDepth in plot:", maxDepth)
-
-    #########################
-    # Parse the samplesheet #
-    #########################
-
-    df = samplesheet_parse(samplesheet)
-
-    validate_samplesheet(df)
-
-
-    ###################
-    # Validate rundir #
-    ###################
-
-    base_dir, fastq_pass_base = validate_rundir(rundir)
+    if report.region_file is not None:
+        logger.info(f"This is the region file: {report.region_file}")
+    logger.info("These are the parameters given:")
+    logger.info(f"This is the samplesheet: {report.sample_sheet}")
+    logger.info(f"This is the run directory: {rundir}")
+    logger.info(f"This is the reference{' directory' if report.reference.is_dir() else ''}: {report.reference}")
+    logger.info(f"This is the threshold: {report.threshold}")
+    logger.info(f"This is the maxDepth in plot: {report.maxDepth}")
 
     ###########################
     # Create output directory #
     ###########################
-    if one_ref == True:
-        out_base = os.path.join(base_dir, "CoverMon_"+reference.split("/")[-1].split(".")[0])
-    else:
-        out_base = os.path.join(base_dir, "CoverMon") # out_base is the directory where the pipeline will write its output to.
-    print("Creating output directory ", out_base,"...")
-    print("Creating output directory ", out_base,"...")
-    subprocess.run(["mkdir","-p", out_base])
-    print()
+    logger.info(f"Creating output directory {report.out_base}...")
+    report.out_base.mkdir(parents=True, exist_ok=True)
 
-    sample_sheet_out = f"{out_base}/sample_sheet_given.tsv"
-    print(f"Backing up the original sample sheet ...               ", end = "", flush = True)
+    # back up sample sheet - TODO: doing this twice - should we give the CoverReport yet another attribute?
+    df = parse_samplesheet(report.sample_sheet)
+    sample_sheet_out = report.out_base / "sample_sheet_given.tsv"
+    logger.info("Backing up the original sample sheet...")
     df.to_csv(sample_sheet_out, sep = "\t", index=False, na_rep='NA')
-    print("✓")
-
-    #########################
-    # Create workflow table #
-    #########################
-
-    workflow_table = create_workflow_table(df)
 
     ##################
     # Start CoverMon #
     ##################
-
-    # Set an open_report state to stop opening multiple reports
-    print("Setting open_report to false")
-    open_report = False
-
     # Keep track of processed files to avoid starting from scratch if script is terminated
-    if exists(f"{out_base}/processed_files.txt") and open_report == False:
-        print("I have found processed files, opening report")
-        processed_files_txt = open(f"{out_base}/processed_files.txt", mode ="r", newline=nl)
-        processed_files = processed_files_txt.read().splitlines()
-        processed_files_txt.close()
-        # Starts browser-sync in a new terminal. This will not work on windows or macOS.
-        subprocess.run("gnome-terminal --tab -- browser-sync start -w --no-notify -s \"" + out_base +"\" --host 127.0.0.1 --port 9000 --index \"plot_cov.html\"", shell=True)                
-        open_report = True
-    else:
-        processed_files = []
+    if ((report.out_base / "processed_files.txt").exists() and (report.out_base / "settings.json").exists()
+            and not report.is_open):  # TODO: it'll always be closed?
+        logger.info("I have found processed files, opening existing report")
+        old_report = load_report_from_settings(report.out_base / "settings.json")
 
-    # Define temporary mapping files which will be used for merging new mapping of new output files with existing
-    tmpsam = out_base+'/'+'tmp.sam'
-    tmpbam = out_base+'/'+'tmp.bam'
+        # TODO: use the processed files from the old report settings?
+        with open(report.out_base / "processed_files.txt", "r", encoding = "utf-8") as processed_files_txt:
+            processed_files = [pathlib.Path(processed).resolve()
+                               for processed in processed_files_txt.read().splitlines()]
+            report.add_processed_files(processed_files)
+        if old_report != report:
+            error_msg = ("Attempting to continue an interrupted run with different settings."
+                             " Please choose a different"
+                             " output directory to run analysis with the new settings.\n"
+                             "Old settings:\n"
+                             f"{old_report}\n"
+                             "New settings:\n"
+                             f"{report}")
+            raise ValueError(error_msg)
+        logger.info("Current settings match saved settings")
+        plot_cov_cmd3 = get_r_cmd(report)
+        subprocess.run(" ".join(plot_cov_cmd3), shell=True, check = True)
+        logger.info("Opening report")
+        report.set_open_status(True)
+        webbrowser.open_new_tab(f"file://{report.out_base / 'plot_cov.html'}")
 
     # When sequencing, we will check for new files every 60 seconds
     seconds_wait = 60
@@ -324,20 +603,18 @@ def start_covermon():
 
     while still_sequencing:
         # Scans for new files and updates the plot if any are found
-        open_report = update_plot(workflow_table, reference, sample_sheet_out,open_report)
+        update_plot(report)
 
         # Continue the monitor as long as the sequence summary does not exist. Wait <seconds_wait> between scans.
-        sequencing_summary_file = glob.glob(base_dir + "/sequencing_summary_*.txt")
+        sequencing_summary_file = list(report.fastq_dir.parent.glob("sequencing_summary_*.txt"))
         if len(sequencing_summary_file) == 0:
             print(f"  Still sequencing/basecalling; waiting {seconds_wait} seconds before next scan ...")
             time.sleep(seconds_wait)
         else:
             still_sequencing = False
 
-
-    sequencing_summary_file = sequencing_summary_file[0]
-    print("  The sequencing summary has been found. Run complete    ✓")
+    logger.info("  The sequencing summary has been found. Run complete    ✓")
 
 if __name__ == "__main__":
-    start_covermon()
+    start_covermon(sys.argv[1:])
 
